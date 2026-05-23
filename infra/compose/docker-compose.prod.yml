@@ -1,22 +1,37 @@
 services:
-
   api:
     restart: unless-stopped
+#    ports:
+#      - "127.0.0.1:8000:8000"
 
   frontend:
     restart: unless-stopped
+#    ports:
+#      - "127.0.0.1:3000:3000"
 
   worker:
     restart: unless-stopped
 
   postgres:
     restart: unless-stopped
+#    ports:
+#      - "127.0.0.1:5432:5432"
+    volumes:
+      - /opt/lamachine/data/postgres:/var/lib/postgresql/data
 
   qdrant:
     restart: unless-stopped
-
-  langfuse:
-    restart: unless-stopped
+#    ports:
+#      - "127.0.0.1:6333:6333"
+    volumes:
+      - /opt/lamachine/data/qdrant:/qdrant/storage
 
   caddy:
     restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/lamachine/data/caddy_data:/data
+      - /opt/lamachine/data/caddy_config:/config
