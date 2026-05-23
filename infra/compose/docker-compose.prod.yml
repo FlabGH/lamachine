@@ -1,0 +1,22 @@
+services:
+
+  api:
+    restart: unless-stopped
+
+  frontend:
+    restart: unless-stopped
+
+  worker:
+    restart: unless-stopped
+
+  postgres:
+    restart: unless-stopped
+
+  qdrant:
+    restart: unless-stopped
+
+  langfuse:
+    restart: unless-stopped
+
+  caddy:
+    restart: unless-stopped

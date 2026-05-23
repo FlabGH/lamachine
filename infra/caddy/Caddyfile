@@ -1,0 +1,3 @@
+:80 {
+    respond "lamachine-poc ok" 200
+}
