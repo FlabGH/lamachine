@@ -46,12 +46,12 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
-  langfuse:
-    image: langfuse/langfuse:latest
-    env_file:
-      - ../../.env
-    ports:
-      - "3001:3000"
+#  langfuse:
+#    image: langfuse/langfuse:latest
+#    env_file:
+#      - ../../.env
+#    ports:
+#      - "3001:3000"
 
   caddy:
     image: caddy:2

@@ -8,8 +8,10 @@ services:
   frontend:
     volumes:
       - ../../apps/frontend:/app
-    command: npm run dev -- --host 0.0.0.0
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 3000
 
   worker:
     volumes:
       - ../../apps/workers:/app
+    command: python worker.py
