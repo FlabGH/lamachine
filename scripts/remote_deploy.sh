@@ -96,7 +96,15 @@ echo "4) Verifying remote API health"
 ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<REMOTE
   set -euo pipefail
   cd "$REMOTE_DIR"
-  docker compose -f "$REMOTE_DOCKER_COMPOSE" exec -T api sh -c 'python -c "import urllib.request, json; print(urllib.request.urlopen(\"http://127.0.0.1:8000/health\").read().decode())"'
+  for i in 1 5; do
+    if docker compose -f "$REMOTE_DOCKER_COMPOSE" exec -T api sh -c 'python -c "import urllib.request, json; print(urllib.request.urlopen(\"http://127.0.0.1:8000/health\").read().decode())"' ; then
+      exit 0
+    fi
+    echo "API health check attempt $i failed, retrying..."
+    sleep 2
+  done
+  echo "ERROR: remote API health check failed after retries"
+  exit 1
 REMOTE
 
 echo "Deployment complete. If you need to enable Mistral provider, update the remote .env file and re-run this script."
