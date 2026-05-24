@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from app.services.ai.embedding_adapters import HashEmbeddingClient
+from app.services.ai.embedding_adapters import HashEmbeddingClient, MistralEmbeddingClient
 from app.services.ai.llm_adapters import ExtractiveNoteLLMClient
 from app.services.ai.reranker_adapters import LexicalOverlapReranker
 
@@ -21,6 +21,9 @@ def get_embedding_client(provider: Optional[str] = None, model: Optional[str] = 
 
     if provider == "local":
         return HashEmbeddingClient()
+
+    if provider == "mistral":
+        return MistralEmbeddingClient()
 
     raise ValueError(f"Unknown embedding provider: {provider}")
 
