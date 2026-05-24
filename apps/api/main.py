@@ -4,9 +4,9 @@ import httpx
 import psycopg
 from fastapi import FastAPI
 
-app = FastAPI(title="LaMachine POC API")
-
 from app.api.documentary import router as documentary_router
+
+app = FastAPI(title="LaMachine POC API")
 
 app.include_router(documentary_router)              # pour prod via Caddy handle_path
 app.include_router(documentary_router, prefix="/api")  # pour tests directs WSL : localhost:8000/api/...

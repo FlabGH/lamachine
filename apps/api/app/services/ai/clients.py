@@ -4,6 +4,18 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 
+class ProviderError(Exception):
+    """Base exception for provider/adapter errors."""
+
+
+class ProviderTimeout(ProviderError):
+    """Raised when a provider call times out."""
+
+
+class ProviderRetryError(ProviderError):
+    """Raised when retries for a provider call are exhausted."""
+
+
 @dataclass(frozen=True)
 class LLMMessage:
     role: str  # system | user | assistant

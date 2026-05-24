@@ -5,7 +5,7 @@
 *.key
 id_*
 *.pub
-
+AGENTS.md
 
 __pycache__/
 *.pyc

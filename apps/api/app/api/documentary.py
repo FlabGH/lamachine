@@ -18,7 +18,7 @@ from app.services.documentary.ingestion import (
 
 from app.services.documentary.chunking import chunk_text
 
-from app.services.ai.embedding_adapters import HashEmbeddingClient
+from app.services.ai.factory import get_embedding_client, get_reranker_client, get_llm_client
 from app.services.documentary.vector_store import (
     ensure_collection,
     get_qdrant_client,
@@ -26,11 +26,9 @@ from app.services.documentary.vector_store import (
 )
 
 from app.services.ai.clients import RerankCandidate
-from app.services.ai.reranker_adapters import LexicalOverlapReranker
 from app.services.documentary.vector_store import search_chunks
 
 from app.services.ai.clients import LLMMessage
-from app.services.ai.llm_adapters import ExtractiveNoteLLMClient
 
 router = APIRouter(prefix="/documentary", tags=["documentary"])
 
@@ -146,7 +144,7 @@ async def create_source(payload: SourceCreate) -> SourceRead:
 
 @router.post("/index", response_model=RunRead)
 async def index_document(payload: IndexRequest) -> RunRead:
-    embedding_client = HashEmbeddingClient()
+    embedding_client = get_embedding_client()
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -367,8 +365,8 @@ async def index_document(payload: IndexRequest) -> RunRead:
 
 @router.post("/search", response_model=SearchResponse)
 async def search_documents(payload: SearchRequest) -> SearchResponse:
-    embedding_client = HashEmbeddingClient()
-    reranker = LexicalOverlapReranker()
+    embedding_client = get_embedding_client()
+    reranker = get_reranker_client()
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -538,7 +536,6 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                 candidates,
                 top_k=payload.rerank_top_k,
             )
-            rerank_by_id = {item.id: item for item in reranked}
             row_by_id = {str(row["id"]): row for row, _, _, _ in fused}
 
             final_hits = []
@@ -610,7 +607,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
 
 @router.post("/generate-note", response_model=GenerateNoteResponse)
 async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
-    llm = ExtractiveNoteLLMClient()
+    llm = get_llm_client()
 
     search_response = await search_documents(
         SearchRequest(
