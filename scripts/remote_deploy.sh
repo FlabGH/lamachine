@@ -25,6 +25,27 @@ fi
 LOCAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 REMOTE_BRANCH=${REMOTE_BRANCH:-$LOCAL_BRANCH}
 
+RSYNC_EXCLUDES=(
+  .git
+  .venv
+  node_modules
+  dist
+  build
+  data
+  storage
+  postgres_data
+  qdrant_data
+  .DS_Store
+  .pytest_cache
+  .ruff_cache
+  .env
+  '*.log'
+  '*.pem'
+  '*.key'
+  'id_*'
+  '*.pub'
+)
+
 echo "Deploying branch '$LOCAL_BRANCH' to $REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR"
 
 echo "1) Verifying local git status"
@@ -49,12 +70,23 @@ else
 fi
 
 echo "3) Updating remote repository and restarting Docker Compose"
-ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<REMOTE
+if ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<REMOTE
   set -euo pipefail
   cd "$REMOTE_DIR"
   git fetch --all --prune
   git checkout "$REMOTE_BRANCH"
   git reset --hard "origin/$REMOTE_BRANCH"
+REMOTE
+then
+  echo "Remote git update succeeded"
+else
+  echo "Remote git update failed; falling back to rsync-based deploy"
+  rsync -av --delete "${RSYNC_EXCLUDES[@]/#/--exclude=}" ./ "$REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR/"
+fi
+
+ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<REMOTE
+  set -euo pipefail
+  cd "$REMOTE_DIR"
   docker compose -f "$REMOTE_DOCKER_COMPOSE" pull
   docker compose -f "$REMOTE_DOCKER_COMPOSE" up -d --build
   docker compose -f "$REMOTE_DOCKER_COMPOSE" ps
