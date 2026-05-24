@@ -49,7 +49,7 @@ else
 fi
 
 echo "3) Updating remote repository and restarting Docker Compose"
-ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<'REMOTE'
+ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<REMOTE
   set -euo pipefail
   cd "$REMOTE_DIR"
   git fetch --all --prune
@@ -61,7 +61,7 @@ ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<'REMOTE'
 REMOTE
 
 echo "4) Verifying remote API health"
-ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<'REMOTE'
+ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<REMOTE
   set -euo pipefail
   cd "$REMOTE_DIR"
   docker compose -f "$REMOTE_DOCKER_COMPOSE" exec -T api sh -c 'python -c "import urllib.request, json; print(urllib.request.urlopen(\"http://127.0.0.1:8000/health\").read().decode())"'
