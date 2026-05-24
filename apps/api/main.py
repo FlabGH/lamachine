@@ -8,7 +8,8 @@ app = FastAPI(title="LaMachine POC API")
 
 from app.api.documentary import router as documentary_router
 
-app.include_router(documentary_router, prefix="/api")
+app.include_router(documentary_router)              # pour prod via Caddy handle_path
+app.include_router(documentary_router, prefix="/api")  # pour tests directs WSL : localhost:8000/api/...
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
