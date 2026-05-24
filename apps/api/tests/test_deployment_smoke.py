@@ -3,9 +3,12 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from main import app
 
 
+# Local WSL runs may hang inside FastAPI/Starlette TestClient even when app import
+# and direct health() calls work. Treat that as a local ASGI test runtime limit,
+# and validate deployment health through real HTTP smoke checks on the server.
 @pytest.fixture(scope="module")
 def client():
     return TestClient(app)
