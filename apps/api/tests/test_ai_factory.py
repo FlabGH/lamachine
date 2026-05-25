@@ -93,6 +93,31 @@ class TestAIClientFactory:
         assert isinstance(client, MistralEmbeddingClient)
         assert client.provider == "mistral"
 
+    def test_embedding_client_can_be_selected_from_preset(self, monkeypatch):
+        monkeypatch.setenv("AI_BACKEND_PRESET", "poc-mistral-jina")
+
+        client = get_embedding_client()
+
+        assert isinstance(client, MistralEmbeddingClient)
+        assert client.provider == "mistral"
+
+    def test_embedding_preset_overrides_provider_env(self, monkeypatch):
+        monkeypatch.setenv("AI_BACKEND_PRESET", "poc-mistral-jina")
+        monkeypatch.setenv("EMBEDDING_PROVIDER", "local")
+
+        client = get_embedding_client()
+
+        assert isinstance(client, MistralEmbeddingClient)
+        assert client.provider == "mistral"
+
+    def test_embedding_provider_argument_overrides_preset(self, monkeypatch):
+        monkeypatch.setenv("AI_BACKEND_PRESET", "local")
+
+        client = get_embedding_client(provider="mistral")
+
+        assert isinstance(client, MistralEmbeddingClient)
+        assert client.provider == "mistral"
+
     def test_unknown_embedding_provider_raises(self):
         with pytest.raises(ValueError, match="Unknown embedding provider"):
             get_embedding_client(provider="unknown")
@@ -111,6 +136,14 @@ class TestAIClientFactory:
         monkeypatch.setenv("RERANKER_PROVIDER", "local")
 
         client = get_reranker_client(provider="jina")
+
+        assert isinstance(client, JinaRerankerClient)
+        assert client.provider == "jina"
+
+    def test_reranker_client_can_be_selected_from_preset(self, monkeypatch):
+        monkeypatch.setenv("AI_BACKEND_PRESET", "poc-mistral-jina")
+
+        client = get_reranker_client()
 
         assert isinstance(client, JinaRerankerClient)
         assert client.provider == "jina"
@@ -136,6 +169,14 @@ class TestAIClientFactory:
         monkeypatch.setenv("LLM_PROVIDER", "local")
 
         client = get_llm_client(provider="mistral")
+
+        assert isinstance(client, MistralLLMClient)
+        assert client.provider == "mistral"
+
+    def test_llm_client_can_be_selected_from_preset(self, monkeypatch):
+        monkeypatch.setenv("AI_BACKEND_PRESET", "poc-mistral-jina")
+
+        client = get_llm_client()
 
         assert isinstance(client, MistralLLMClient)
         assert client.provider == "mistral"

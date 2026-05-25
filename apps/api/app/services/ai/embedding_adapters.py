@@ -49,8 +49,8 @@ class MistralEmbeddingClient:
     model = "mistral-embed"
 
     def __init__(self) -> None:
-        env_dimension = os.getenv("MISTRAL_EMBED_DIMENSION")
-        if env_dimension is not None:
+        env_dimension = os.getenv("MISTRAL_EMBED_DIMENSION", "").strip()
+        if env_dimension:
             self.dimension = int(env_dimension)
             self._dimension_from_config = True
         else:

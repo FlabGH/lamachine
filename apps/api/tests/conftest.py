@@ -33,6 +33,7 @@ class DummyAsyncClient:
 
 @pytest.fixture(autouse=True)
 def clear_provider_env(monkeypatch):
+    monkeypatch.delenv("AI_BACKEND_PRESET", raising=False)
     monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.delenv("RERANKER_PROVIDER", raising=False)

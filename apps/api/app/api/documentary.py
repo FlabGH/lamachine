@@ -20,6 +20,7 @@ from app.services.documentary.ingestion import (
 from app.services.documentary.chunking import chunk_text
 
 from app.services.ai.factory import get_embedding_client, get_reranker_client, get_llm_client
+from app.services.ai.presets import get_ai_backend_preset_name
 from app.services.documentary.vector_store import (
     ensure_collection,
     get_qdrant_client,
@@ -162,6 +163,7 @@ async def create_source(payload: SourceCreate) -> SourceRead:
 @router.post("/index", response_model=RunRead)
 async def index_document(payload: IndexRequest) -> RunRead:
     embedding_client = get_embedding_client()
+    ai_backend_preset = get_ai_backend_preset_name()
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -228,6 +230,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                         {
                             "document_id": str(payload.document_id),
                             "index_version_id": str(payload.index_version_id),
+                            "ai_backend_preset": ai_backend_preset,
                             "vector_collection": index_version["vector_collection"],
                             "embedding_provider": embedding_client.provider,
                             "embedding_model": embedding_client.model,
@@ -420,6 +423,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     json.dumps(
                         {
                             "chunks_created": len(chunks),
+                            "ai_backend_preset": ai_backend_preset,
                             "vector_collection": index_version["vector_collection"],
                             "embedding_provider": embedding_client.provider,
                             "embedding_model": embedding_client.model,
@@ -441,6 +445,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
 async def search_documents(payload: SearchRequest) -> SearchResponse:
     embedding_client = get_embedding_client()
     reranker = get_reranker_client()
+    ai_backend_preset = get_ai_backend_preset_name()
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -473,6 +478,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                             "top_k": payload.top_k,
                             "rerank_top_k": payload.rerank_top_k,
                             "index_version_id": str(payload.index_version_id),
+                            "ai_backend_preset": ai_backend_preset,
                             "vector_collection": index_version["vector_collection"],
                             "embedding_provider": embedding_client.provider,
                             "embedding_model": embedding_client.model,
@@ -593,6 +599,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                         json.dumps(
                             {
                                 "hits": 0,
+                                "ai_backend_preset": ai_backend_preset,
                                 "dense_hits": len(dense_hits),
                                 "lexical_hits": len(lexical_hits),
                                 "embedding_model_call_id": str(query_embedding_model_call_id),
@@ -754,6 +761,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                     json.dumps(
                         {
                             "hits": len(final_hits),
+                            "ai_backend_preset": ai_backend_preset,
                             "dense_hits": len(dense_hits),
                             "lexical_hits": len(lexical_hits),
                             "candidates": len(candidates),
@@ -779,6 +787,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
 @router.post("/generate-note", response_model=GenerateNoteResponse)
 async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
     llm = get_llm_client()
+    ai_backend_preset = get_ai_backend_preset_name()
 
     search_response = await search_documents(
         SearchRequest(
@@ -830,6 +839,7 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
         "temperature": 0.2,
         "prompt_version": payload.prompt_version,
         "retrieval_run_id": str(search_response.run_id),
+        "ai_backend_preset": ai_backend_preset,
     }
 
     with get_connection() as conn:
@@ -857,6 +867,7 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                             "personas": [p.value for p in payload.personas],
                             "retrieval_run_id": str(search_response.run_id),
                             "prompt_version": payload.prompt_version,
+                            "ai_backend_preset": ai_backend_preset,
                             "llm_provider": llm.provider,
                             "llm_model": llm.model,
                             "hits_used": len(search_response.hits),
@@ -867,6 +878,7 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                             "outputs": len(payload.personas),
                             "retrieval_run_id": str(search_response.run_id),
                             "prompt_version": payload.prompt_version,
+                            "ai_backend_preset": ai_backend_preset,
                             "llm_provider": llm.provider,
                             "llm_model": llm.model,
                             "hits_used": len(search_response.hits),
@@ -948,6 +960,7 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                                 "retrieval_run_id": str(search_response.run_id),
                                 "index_version_id": str(payload.index_version_id),
                                 "prompt_version": payload.prompt_version,
+                                "ai_backend_preset": ai_backend_preset,
                                 "llm_provider": llm.provider,
                                 "llm_model": llm.model,
                                 "llm_model_call_id": str(llm_model_call_id),
