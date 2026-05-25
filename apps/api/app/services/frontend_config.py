@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from app.api.documentary import GenerateNoteRequest
 from app.services.ai.presets import AI_BACKEND_PRESETS, resolve_ai_backend_preset
+
+
+def _selected_provider(env_var: str, preset_field: str) -> str:
+    preset_name = os.getenv("AI_BACKEND_PRESET", "").strip()
+    if preset_name:
+        return getattr(resolve_ai_backend_preset(preset_name), preset_field)
+
+    env_provider = os.getenv(env_var, "").strip().lower()
+    if env_provider:
+        return env_provider
+
+    return getattr(resolve_ai_backend_preset("local"), preset_field)
 
 
 def build_frontend_config() -> dict[str, Any]:
@@ -25,9 +38,18 @@ def build_frontend_config() -> dict[str, Any]:
             for preset in AI_BACKEND_PRESETS.values()
         ],
         "selected_providers": {
-            "embedding_provider": active_preset.embedding_provider,
-            "reranker_provider": active_preset.reranker_provider,
-            "llm_provider": active_preset.llm_provider,
+            "embedding_provider": _selected_provider(
+                "EMBEDDING_PROVIDER",
+                "embedding_provider",
+            ),
+            "reranker_provider": _selected_provider(
+                "RERANKER_PROVIDER",
+                "reranker_provider",
+            ),
+            "llm_provider": _selected_provider(
+                "LLM_PROVIDER",
+                "llm_provider",
+            ),
         },
         "default_generation": {
             "personas": [persona.value for persona in default_generation.personas],

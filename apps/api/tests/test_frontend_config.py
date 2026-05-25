@@ -32,6 +32,36 @@ def test_frontend_config_exposes_active_preset_from_env(monkeypatch):
     }
 
 
+def test_frontend_config_preset_overrides_direct_provider_env(monkeypatch):
+    monkeypatch.setenv("AI_BACKEND_PRESET", "poc-mistral-jina")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "local")
+    monkeypatch.setenv("RERANKER_PROVIDER", "local")
+    monkeypatch.setenv("LLM_PROVIDER", "local")
+
+    config = build_frontend_config()
+
+    assert config["selected_providers"] == {
+        "embedding_provider": "mistral",
+        "reranker_provider": "jina",
+        "llm_provider": "mistral",
+    }
+
+
+def test_frontend_config_uses_direct_provider_env_without_preset(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "mistral")
+    monkeypatch.setenv("RERANKER_PROVIDER", "jina")
+    monkeypatch.setenv("LLM_PROVIDER", "mistral")
+
+    config = build_frontend_config()
+
+    assert config["ai_backend_preset"] == "local"
+    assert config["selected_providers"] == {
+        "embedding_provider": "mistral",
+        "reranker_provider": "jina",
+        "llm_provider": "mistral",
+    }
+
+
 def test_frontend_config_lists_expected_presets():
     config = build_frontend_config()
     preset_names = {
