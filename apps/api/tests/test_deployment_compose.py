@@ -7,7 +7,9 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_DIR = REPO_ROOT / "infra" / "compose"
 LOCAL_COMPOSE = COMPOSE_DIR / "docker-compose.local.yml"
+PROD_COMPOSE = COMPOSE_DIR / "docker-compose.prod.yml"
 ROOT_COMPOSE = COMPOSE_DIR / "docker-compose.yml"
+REMOTE_DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "remote_deploy.sh"
 REQUIRED_SERVICES = {"api", "frontend", "worker", "postgres", "qdrant", "caddy"}
 
 
@@ -64,7 +66,7 @@ def docker_compose_available() -> bool:
 
 @pytest.mark.parametrize(
     "compose_path",
-    [LOCAL_COMPOSE, ROOT_COMPOSE],
+    [LOCAL_COMPOSE, PROD_COMPOSE, ROOT_COMPOSE],
 )
 def test_docker_compose_file_exists(compose_path: Path):
     assert compose_path.exists() and compose_path.is_file(), f"Missing compose file: {compose_path}"
@@ -72,7 +74,7 @@ def test_docker_compose_file_exists(compose_path: Path):
 
 @pytest.mark.parametrize(
     "compose_path",
-    [LOCAL_COMPOSE, ROOT_COMPOSE],
+    [LOCAL_COMPOSE, PROD_COMPOSE, ROOT_COMPOSE],
 )
 def test_docker_compose_defines_required_services(compose_path: Path):
     service_names = parse_service_names(compose_path)
@@ -117,3 +119,12 @@ def test_root_compose_syntax_is_valid():
         check=True,
         timeout=30,
     )
+
+
+def test_remote_deploy_defaults_to_prod_compose_override():
+    script = REMOTE_DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    assert "REMOTE_DOCKER_COMPOSE_FILES=" in script
+    assert "infra/compose/docker-compose.yml infra/compose/docker-compose.prod.yml" in script
+    assert 'compose_args+=("-f" "\\$compose_file")' in script
+    assert 'docker compose "\\${compose_args[@]}" up -d --build' in script

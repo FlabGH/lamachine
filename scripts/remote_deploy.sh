@@ -4,13 +4,14 @@ set -euo pipefail
 # Remote deployment helper for LaMachine POC.
 # Usage:
 #   REMOTE_HOST=151.115.151.104 REMOTE_USER=ubuntu REMOTE_DIR=/opt/lamachine/data/lamachinepoc ./scripts/remote_deploy.sh
-# Optionally set REMOTE_BRANCH (default current branch) and REMOTE_DOCKER_COMPOSE (default infra/compose/docker-compose.yml).
+# Optionally set REMOTE_BRANCH (default current branch) and REMOTE_DOCKER_COMPOSE_FILES
+# (default "infra/compose/docker-compose.yml infra/compose/docker-compose.prod.yml").
 
 REMOTE_HOST=${REMOTE_HOST:-}
 REMOTE_USER=${REMOTE_USER:-ubuntu}
 REMOTE_DIR=${REMOTE_DIR:-}
 REMOTE_BRANCH=${REMOTE_BRANCH:-}
-REMOTE_DOCKER_COMPOSE=${REMOTE_DOCKER_COMPOSE:-infra/compose/docker-compose.yml}
+REMOTE_DOCKER_COMPOSE_FILES=${REMOTE_DOCKER_COMPOSE_FILES:-"infra/compose/docker-compose.yml infra/compose/docker-compose.prod.yml"}
 
 if [[ -z "$REMOTE_HOST" ]]; then
   echo "ERROR: REMOTE_HOST must be set"
@@ -47,6 +48,7 @@ RSYNC_EXCLUDES=(
 )
 
 echo "Deploying branch '$LOCAL_BRANCH' to $REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR"
+echo "Using remote Docker Compose files: $REMOTE_DOCKER_COMPOSE_FILES"
 
 echo "1) Verifying local git status"
 git status --short
@@ -87,17 +89,25 @@ fi
 ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<REMOTE
   set -euo pipefail
   cd "$REMOTE_DIR"
-  docker compose -f "$REMOTE_DOCKER_COMPOSE" pull
-  docker compose -f "$REMOTE_DOCKER_COMPOSE" up -d --build
-  docker compose -f "$REMOTE_DOCKER_COMPOSE" ps
+  compose_args=()
+  for compose_file in $REMOTE_DOCKER_COMPOSE_FILES; do
+    compose_args+=("-f" "\$compose_file")
+  done
+  docker compose "\${compose_args[@]}" pull
+  docker compose "\${compose_args[@]}" up -d --build
+  docker compose "\${compose_args[@]}" ps
 REMOTE
 
 echo "4) Verifying remote API health"
 ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<REMOTE
   set -euo pipefail
   cd "$REMOTE_DIR"
+  compose_args=()
+  for compose_file in $REMOTE_DOCKER_COMPOSE_FILES; do
+    compose_args+=("-f" "\$compose_file")
+  done
   for i in 1 2 3 4 5; do
-    if docker compose -f "$REMOTE_DOCKER_COMPOSE" exec -T api sh -c 'python -c "import urllib.request, json; print(urllib.request.urlopen(\"http://127.0.0.1:8000/health\").read().decode())"' ; then
+    if docker compose "\${compose_args[@]}" exec -T api sh -c 'python -c "import urllib.request, json; print(urllib.request.urlopen(\"http://127.0.0.1:8000/health\").read().decode())"' ; then
       exit 0
     fi
     echo "API health check attempt \$i failed, retrying..."
