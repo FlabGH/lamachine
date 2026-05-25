@@ -2,9 +2,10 @@ import asyncio
 
 import pytest
 
-from app.services.ai.clients import RerankCandidate, RerankResult
+from app.services.ai.clients import LLMMessage, RerankCandidate, RerankResult
 from app.services.ai.factory import get_embedding_client, get_llm_client, get_reranker_client
 from app.services.ai.embedding_adapters import MistralEmbeddingClient
+from app.services.ai.llm_adapters import MistralLLMClient
 from app.services.ai.reranker_adapters import JinaRerankerClient
 
 
@@ -39,6 +40,30 @@ class DummyJinaAsyncClient:
             "results": [
                 {"index": 1, "relevance_score": 0.9},
                 {"index": 0, "relevance_score": 0.3},
+            ]
+        })
+
+
+class DummyMistralLLMAsyncClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def post(self, api_url, json, headers):
+        assert api_url == "https://api.mistral.ai/v1/chat/completions"
+        assert json["model"] == "mistral-medium-latest"
+        assert json["messages"] == [{"role": "user", "content": "hello"}]
+        assert json["temperature"] == 0.1
+        assert json["max_tokens"] == 32
+        assert headers["Authorization"] == "Bearer test-key"
+        return DummyResponse({
+            "choices": [
+                {"message": {"role": "assistant", "content": "Bonjour"}}
             ]
         })
 
@@ -96,6 +121,44 @@ class TestAIClientFactory:
 
         assert llm_client.provider == "local"
         assert reranker_client.provider == "local"
+
+    def test_llm_client_can_be_selected_from_env(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "mistral")
+        monkeypatch.setenv("MISTRAL_LLM_MODEL", "mistral-medium-latest")
+
+        client = get_llm_client()
+
+        assert isinstance(client, MistralLLMClient)
+        assert client.provider == "mistral"
+        assert client.model == "mistral-medium-latest"
+
+    def test_llm_client_provider_argument_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "local")
+
+        client = get_llm_client(provider="mistral")
+
+        assert isinstance(client, MistralLLMClient)
+        assert client.provider == "mistral"
+
+    def test_mistral_llm_client_generates(self, monkeypatch):
+        monkeypatch.setenv("MISTRAL_EMBED_API_KEY", "test-key")
+        monkeypatch.setenv("MISTRAL_LLM_MODEL", "mistral-medium-latest")
+        monkeypatch.setattr("httpx.AsyncClient", DummyMistralLLMAsyncClient)
+
+        client = MistralLLMClient()
+        result = asyncio.run(
+            client.generate(
+                [LLMMessage(role="user", content="hello")],
+                temperature=0.1,
+                max_tokens=32,
+            )
+        )
+
+        assert result.provider == "mistral"
+        assert result.model == "mistral-medium-latest"
+        assert result.text == "Bonjour"
+        assert result.raw is not None
+        assert result.raw["adapter"] == "MistralLLMClient"
 
     def test_jina_reranker_client_reranks(self, monkeypatch):
         monkeypatch.setenv("JINA_API_KEY", "test-key")

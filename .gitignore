@@ -6,6 +6,9 @@
 id_*
 *.pub
 AGENTS.md
+SESSION.md
+CODEX.md
+
 
 __pycache__/
 *.pyc

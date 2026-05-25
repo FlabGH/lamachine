@@ -4,7 +4,7 @@ import os
 from typing import Optional
 
 from app.services.ai.embedding_adapters import HashEmbeddingClient, MistralEmbeddingClient
-from app.services.ai.llm_adapters import ExtractiveNoteLLMClient
+from app.services.ai.llm_adapters import ExtractiveNoteLLMClient, MistralLLMClient
 from app.services.ai.reranker_adapters import JinaRerankerClient, LexicalOverlapReranker
 
 
@@ -47,5 +47,8 @@ def get_llm_client(provider: Optional[str] = None, model: Optional[str] = None):
 
     if provider == "local":
         return ExtractiveNoteLLMClient()
+
+    if provider == "mistral":
+        return MistralLLMClient(model=model)
 
     raise ValueError(f"Unknown LLM provider: {provider}")
