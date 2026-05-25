@@ -6,9 +6,15 @@ import psycopg
 from psycopg.rows import dict_row
 
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://lamachine:lamachine@postgres:5432/lamachine",
+def normalize_psycopg_url(url: str) -> str:
+    return url.replace("postgresql+psycopg://", "postgresql://", 1)
+
+
+DATABASE_URL = normalize_psycopg_url(
+    os.getenv(
+        "DATABASE_URL",
+        "postgresql://lamachine:lamachine@postgres:5432/lamachine",
+    )
 )
 
 

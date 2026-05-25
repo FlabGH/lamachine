@@ -1,11 +1,11 @@
 import os
 
 import httpx
-import psycopg
 from fastapi import FastAPI
 
 from app.api.config import router as config_router
 from app.api.documentary import router as documentary_router
+from app.db import get_connection
 
 app = FastAPI(title="LaMachine POC API")
 
@@ -14,7 +14,6 @@ app.include_router(documentary_router)              # pour prod via Caddy handle
 app.include_router(config_router, prefix="/api")  # pour tests directs WSL : localhost:8000/api/...
 app.include_router(documentary_router, prefix="/api")  # pour tests directs WSL : localhost:8000/api/...
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
 
 
@@ -25,10 +24,10 @@ def health() -> dict[str, str]:
 
 @app.get("/health/db")
 def health_db() -> dict[str, str]:
-    with psycopg.connect(DATABASE_URL) as conn:
+    with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("select 1")
-            value = cur.fetchone()[0]
+            cur.execute("select 1 as health_check")
+            value = cur.fetchone()["health_check"]
     return {"status": "ok", "db": str(value)}
 
 
