@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from enum import Enum
 from uuid import UUID
 
@@ -31,6 +32,22 @@ from app.services.documentary.vector_store import search_chunks
 from app.services.ai.clients import LLMMessage
 
 router = APIRouter(prefix="/documentary", tags=["documentary"])
+
+
+DENSE_WEIGHT = 0.6
+LEXICAL_WEIGHT = 0.4
+
+
+def _json_trace_hash(payload: dict | list) -> str:
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _adapter_response_metadata(client, raw: dict | None = None) -> dict:
+    metadata = {"adapter": client.__class__.__name__}
+    if raw:
+        metadata.update(raw)
+    return metadata
 
 
 class RunStatus(str, Enum):
@@ -207,11 +224,29 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     "indexing",
                     "running",
                     payload.index_version_id,
-                    json.dumps({"document_id": str(payload.document_id)}),
+                    json.dumps(
+                        {
+                            "document_id": str(payload.document_id),
+                            "index_version_id": str(payload.index_version_id),
+                            "vector_collection": index_version["vector_collection"],
+                            "embedding_provider": embedding_client.provider,
+                            "embedding_model": embedding_client.model,
+                            "embedding_dimension": embedding_client.dimension,
+                            "chunk_size": index_version["chunk_size"],
+                            "chunk_overlap": index_version["chunk_overlap"],
+                        }
+                    ),
                     json.dumps({}),
                 ),
             )
             run_id = cur.fetchone()["id"]
+
+            embedding_input = {
+                "document_id": str(payload.document_id),
+                "index_version_id": str(payload.index_version_id),
+                "chunk_count": len(chunks),
+                "content_hashes": [chunk.content_sha256 for chunk in chunks],
+            }
 
             cur.execute(
                 """
@@ -220,18 +255,27 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     call_type,
                     provider,
                     model,
+                    input_hash,
                     parameters,
                     response_metadata
                 )
-                VALUES (%s, 'embedding', %s, %s, %s::jsonb, %s::jsonb)
+                VALUES (%s, 'embedding', %s, %s, %s, %s::jsonb, %s::jsonb)
                 RETURNING id
                 """,
                 (
                     run_id,
                     embedding_client.provider,
                     embedding_client.model,
-                    json.dumps({"dimension": embedding_client.dimension}),
-                    json.dumps({"adapter": "HashEmbeddingClient"}),
+                    _json_trace_hash(embedding_input),
+                    json.dumps(
+                        {
+                            "dimension": embedding_client.dimension,
+                            "texts_count": len(chunks),
+                            "index_version_id": str(payload.index_version_id),
+                            "vector_collection": index_version["vector_collection"],
+                        }
+                    ),
+                    json.dumps(_adapter_response_metadata(embedding_client)),
                 ),
             )
             model_call_id = cur.fetchone()["id"]
@@ -284,6 +328,36 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     "index_version_id": str(payload.index_version_id),
                     "document_id": str(payload.document_id),
                 },
+            )
+
+            cur.execute(
+                """
+                UPDATE model_calls
+                SET response_metadata = %s::jsonb,
+                    parameters = %s::jsonb
+                WHERE id = %s
+                """,
+                (
+                    json.dumps(
+                        _adapter_response_metadata(
+                            embedding_client,
+                            {
+                                **(embedding_result.raw or {}),
+                                "dimension": embedding_result.dimension,
+                                "vectors_count": len(embedding_result.vectors),
+                            },
+                        )
+                    ),
+                    json.dumps(
+                        {
+                            "dimension": embedding_result.dimension,
+                            "texts_count": len(inserted_chunks),
+                            "index_version_id": str(payload.index_version_id),
+                            "vector_collection": index_version["vector_collection"],
+                        }
+                    ),
+                    model_call_id,
+                ),
             )
 
             qdrant = get_qdrant_client()
@@ -383,8 +457,84 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
             if index_version is None:
                 raise ValueError(f"Index version not found: {payload.index_version_id}")
 
+            cur.execute(
+                """
+                INSERT INTO runs (run_type, status, index_version_id, input, output)
+                VALUES (%s, %s, %s, %s::jsonb, %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    "retrieval",
+                    "running",
+                    payload.index_version_id,
+                    json.dumps(
+                        {
+                            "query": payload.query,
+                            "top_k": payload.top_k,
+                            "rerank_top_k": payload.rerank_top_k,
+                            "index_version_id": str(payload.index_version_id),
+                            "vector_collection": index_version["vector_collection"],
+                            "embedding_provider": embedding_client.provider,
+                            "embedding_model": embedding_client.model,
+                            "reranker_provider": reranker.provider,
+                            "reranker_model": reranker.model,
+                            "dense_weight": DENSE_WEIGHT,
+                            "lexical_weight": LEXICAL_WEIGHT,
+                        }
+                    ),
+                    json.dumps({}),
+                ),
+            )
+            run_id = cur.fetchone()["id"]
+
             query_embedding = await embedding_client.embed_texts([payload.query])
             query_vector = query_embedding.vectors[0]
+
+            cur.execute(
+                """
+                INSERT INTO model_calls (
+                    run_id,
+                    call_type,
+                    provider,
+                    model,
+                    input_hash,
+                    parameters,
+                    response_metadata
+                )
+                VALUES (%s, 'embedding', %s, %s, %s, %s::jsonb, %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    run_id,
+                    embedding_client.provider,
+                    embedding_client.model,
+                    _json_trace_hash(
+                        {
+                            "query": payload.query,
+                            "index_version_id": str(payload.index_version_id),
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "dimension": query_embedding.dimension,
+                            "texts_count": 1,
+                            "index_version_id": str(payload.index_version_id),
+                            "vector_collection": index_version["vector_collection"],
+                        }
+                    ),
+                    json.dumps(
+                        _adapter_response_metadata(
+                            embedding_client,
+                            {
+                                **(query_embedding.raw or {}),
+                                "dimension": query_embedding.dimension,
+                                "vectors_count": len(query_embedding.vectors),
+                            },
+                        )
+                    ),
+                ),
+            )
+            query_embedding_model_call_id = cur.fetchone()["id"]
 
             qdrant = get_qdrant_client()
             dense_hits = search_chunks(
@@ -433,19 +583,28 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
             if not candidate_ids:
                 cur.execute(
                     """
-                    INSERT INTO runs (run_type, status, index_version_id, input, output, finished_at)
-                    VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, now())
-                    RETURNING id
+                    UPDATE runs
+                    SET status = 'succeeded',
+                        output = %s::jsonb,
+                        finished_at = now()
+                    WHERE id = %s
                     """,
                     (
-                        "retrieval",
-                        "succeeded",
-                        payload.index_version_id,
-                        json.dumps({"query": payload.query}),
-                        json.dumps({"hits": 0}),
+                        json.dumps(
+                            {
+                                "hits": 0,
+                                "dense_hits": len(dense_hits),
+                                "lexical_hits": len(lexical_hits),
+                                "embedding_model_call_id": str(query_embedding_model_call_id),
+                                "vector_collection": index_version["vector_collection"],
+                                "embedding_provider": embedding_client.provider,
+                                "embedding_model": embedding_client.model,
+                                "embedding_dimension": query_embedding.dimension,
+                            }
+                        ),
+                        run_id,
                     ),
                 )
-                run_id = cur.fetchone()["id"]
                 return SearchResponse(run_id=run_id, hits=[])
 
             cur.execute(
@@ -471,11 +630,15 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                 chunk_id = str(row["id"])
                 dense_norm = dense_scores_by_chunk_id.get(chunk_id, 0.0) / max_dense
                 lexical_norm = lexical_scores_by_chunk_id.get(chunk_id, 0.0) / max_lexical
-                fused_score = (0.6 * dense_norm) + (0.4 * lexical_norm)
+                fused_score = (DENSE_WEIGHT * dense_norm) + (LEXICAL_WEIGHT * lexical_norm)
                 fused.append((row, fused_score, dense_norm, lexical_norm))
 
             fused.sort(key=lambda item: item[1], reverse=True)
             fused = fused[: payload.rerank_top_k]
+            initial_rank_by_chunk_id = {
+                str(row["id"]): rank
+                for rank, (row, _, _, _) in enumerate(fused, start=1)
+            }
 
             candidates = [
                 RerankCandidate(
@@ -488,45 +651,36 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
 
             cur.execute(
                 """
-                INSERT INTO runs (run_type, status, index_version_id, input, output)
-                VALUES (%s, %s, %s, %s::jsonb, %s::jsonb)
-                RETURNING id
-                """,
-                (
-                    "retrieval",
-                    "running",
-                    payload.index_version_id,
-                    json.dumps(
-                        {
-                            "query": payload.query,
-                            "top_k": payload.top_k,
-                            "rerank_top_k": payload.rerank_top_k,
-                        }
-                    ),
-                    json.dumps({}),
-                ),
-            )
-            run_id = cur.fetchone()["id"]
-
-            cur.execute(
-                """
                 INSERT INTO model_calls (
                     run_id,
                     call_type,
                     provider,
                     model,
+                    input_hash,
                     parameters,
                     response_metadata
                 )
-                VALUES (%s, 'reranking', %s, %s, %s::jsonb, %s::jsonb)
+                VALUES (%s, 'reranking', %s, %s, %s, %s::jsonb, %s::jsonb)
                 RETURNING id
                 """,
                 (
                     run_id,
                     reranker.provider,
                     reranker.model,
-                    json.dumps({"top_k": payload.rerank_top_k}),
-                    json.dumps({"adapter": "LexicalOverlapReranker"}),
+                    _json_trace_hash(
+                        {
+                            "query": payload.query,
+                            "candidate_ids": [candidate.id for candidate in candidates],
+                            "top_k": payload.rerank_top_k,
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "top_k": payload.rerank_top_k,
+                            "candidates_count": len(candidates),
+                        }
+                    ),
+                    json.dumps(_adapter_response_metadata(reranker)),
                 ),
             )
             rerank_model_call_id = cur.fetchone()["id"]
@@ -568,7 +722,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                     (
                         run_id,
                         item.id,
-                        None,
+                        initial_rank_by_chunk_id.get(item.id),
                         item.rank,
                         dense_norm,
                         lexical_norm,
@@ -597,7 +751,24 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                 WHERE id = %s
                 """,
                 (
-                    json.dumps({"hits": len(final_hits)}),
+                    json.dumps(
+                        {
+                            "hits": len(final_hits),
+                            "dense_hits": len(dense_hits),
+                            "lexical_hits": len(lexical_hits),
+                            "candidates": len(candidates),
+                            "embedding_model_call_id": str(query_embedding_model_call_id),
+                            "rerank_model_call_id": str(rerank_model_call_id),
+                            "vector_collection": index_version["vector_collection"],
+                            "embedding_provider": embedding_client.provider,
+                            "embedding_model": embedding_client.model,
+                            "embedding_dimension": query_embedding.dimension,
+                            "reranker_provider": reranker.provider,
+                            "reranker_model": reranker.model,
+                            "dense_weight": DENSE_WEIGHT,
+                            "lexical_weight": LEXICAL_WEIGHT,
+                        }
+                    ),
                     run_id,
                 ),
             )
@@ -651,6 +822,15 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
             "prompt_version": payload.prompt_version,
         },
     )
+    llm_input = {
+        "messages": [
+            {"role": message.role, "content": message.content}
+            for message in messages
+        ],
+        "temperature": 0.2,
+        "prompt_version": payload.prompt_version,
+        "retrieval_run_id": str(search_response.run_id),
+    }
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -677,9 +857,21 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                             "personas": [p.value for p in payload.personas],
                             "retrieval_run_id": str(search_response.run_id),
                             "prompt_version": payload.prompt_version,
+                            "llm_provider": llm.provider,
+                            "llm_model": llm.model,
+                            "hits_used": len(search_response.hits),
                         }
                     ),
-                    json.dumps({"outputs": len(payload.personas)}),
+                    json.dumps(
+                        {
+                            "outputs": len(payload.personas),
+                            "retrieval_run_id": str(search_response.run_id),
+                            "prompt_version": payload.prompt_version,
+                            "llm_provider": llm.provider,
+                            "llm_model": llm.model,
+                            "hits_used": len(search_response.hits),
+                        }
+                    ),
                 ),
             )
             generation_run_id = cur.fetchone()["id"]
@@ -692,10 +884,11 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                     provider,
                     model,
                     prompt_version,
+                    input_hash,
                     parameters,
                     response_metadata
                 )
-                VALUES (%s, 'llm', %s, %s, %s, %s::jsonb, %s::jsonb)
+                VALUES (%s, 'llm', %s, %s, %s, %s, %s::jsonb, %s::jsonb)
                 RETURNING id
                 """,
                 (
@@ -703,8 +896,16 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                     llm.provider,
                     llm.model,
                     payload.prompt_version,
-                    json.dumps({"temperature": 0.2}),
-                    json.dumps(llm_result.raw or {}),
+                    _json_trace_hash(llm_input),
+                    json.dumps(
+                        {
+                            "temperature": 0.2,
+                            "messages_count": len(messages),
+                            "context_hits": len(search_response.hits),
+                            "retrieval_run_id": str(search_response.run_id),
+                        }
+                    ),
+                    json.dumps(_adapter_response_metadata(llm, llm_result.raw or {})),
                 ),
             )
             llm_model_call_id = cur.fetchone()["id"]
@@ -746,6 +947,10 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                             {
                                 "retrieval_run_id": str(search_response.run_id),
                                 "index_version_id": str(payload.index_version_id),
+                                "prompt_version": payload.prompt_version,
+                                "llm_provider": llm.provider,
+                                "llm_model": llm.model,
+                                "llm_model_call_id": str(llm_model_call_id),
                             }
                         ),
                     ),
