@@ -4,11 +4,14 @@ import httpx
 import psycopg
 from fastapi import FastAPI
 
+from app.api.config import router as config_router
 from app.api.documentary import router as documentary_router
 
 app = FastAPI(title="LaMachine POC API")
 
+app.include_router(config_router)                   # pour prod via Caddy handle_path
 app.include_router(documentary_router)              # pour prod via Caddy handle_path
+app.include_router(config_router, prefix="/api")  # pour tests directs WSL : localhost:8000/api/...
 app.include_router(documentary_router, prefix="/api")  # pour tests directs WSL : localhost:8000/api/...
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
