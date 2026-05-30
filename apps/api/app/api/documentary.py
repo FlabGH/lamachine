@@ -4,14 +4,15 @@ import hashlib
 from enum import Enum
 from uuid import UUID
 
-from fastapi import APIRouter, UploadFile, File, Form
+import psycopg
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel, Field
 
 import json
 
 from app.db import get_connection
 from app.services.documentary.ingestion import (
-    extract_pdf_text,
+    extract_pdf,
     normalize_text,
     save_uploaded_file,
     sha256_bytes,
@@ -96,6 +97,30 @@ class IngestionResponse(BaseModel):
     status: RunStatus
 
 
+class ExtractedPageRead(BaseModel):
+    page: int
+    text: str
+    char_count: int
+    section_title: str | None = None
+
+
+class ExtractionReportRead(BaseModel):
+    method: str | None = None
+    status: str | None = None
+    page_count: int | None = None
+    pages_with_text: int | None = None
+    empty_pages: list[int] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class DocumentExtractionRead(BaseModel):
+    document_id: UUID
+    title: str
+    extraction: ExtractionReportRead
+    pages: list[ExtractedPageRead]
+
+
 class IndexRequest(BaseModel):
     document_id: UUID
     index_version_id: UUID
@@ -163,6 +188,16 @@ async def create_source(payload: SourceCreate) -> SourceRead:
     raise NotImplementedError
 
 
+def _chunk_document_metadata(document_metadata: dict | None) -> dict:
+    if not document_metadata:
+        return {}
+    return {
+        key: value
+        for key, value in document_metadata.items()
+        if key not in {"extraction", "extracted_pages"}
+    }
+
+
 
 @router.post("/index", response_model=RunRead)
 async def index_document(payload: IndexRequest) -> RunRead:
@@ -178,6 +213,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     documents.source_id,
                     documents.title AS document_title,
                     documents.raw_text,
+                    documents.metadata AS document_metadata,
                     sources.code AS source_code
                 FROM documents
                 JOIN sources ON sources.id = documents.source_id
@@ -307,6 +343,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     page_start=chunk.page_start,
                     page_end=chunk.page_end,
                     extra={
+                        **_chunk_document_metadata(document["document_metadata"]),
                         **chunk.metadata,
                         "embedding_provider": embedding_client.provider,
                         "embedding_model": embedding_client.model,
@@ -403,6 +440,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     page_start=chunk.page_start,
                     page_end=chunk.page_end,
                     extra={
+                        **_chunk_document_metadata(document["document_metadata"]),
                         **chunk.metadata,
                         "embedding_provider": embedding_client.provider,
                         "embedding_model": embedding_client.model,
@@ -1064,8 +1102,10 @@ async def ingest_pdf(
 ) -> IngestionResponse:
     content = await file.read()
     storage_path, digest = save_uploaded_file(file.filename or "upload.pdf", content)
-    raw_text = extract_pdf_text(storage_path)
+    extraction = extract_pdf(storage_path)
+    raw_text = extraction.raw_text
     title = file.filename or source_code
+    document_metadata = extraction.metadata()
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -1079,25 +1119,37 @@ async def ingest_pdf(
             )
             source_id = cur.fetchone()["id"]
 
-            cur.execute(
-                """
-                INSERT INTO documents (
-                    source_id, title, filename, mime_type,
-                    storage_path, sha256, status, raw_text
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO documents (
+                        source_id, title, filename, mime_type,
+                        storage_path, sha256, status, raw_text, metadata
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, 'parsed', %s, %s::jsonb)
+                    RETURNING id
+                    """,
+                    (
+                        source_id,
+                        title,
+                        file.filename,
+                        file.content_type or "application/pdf",
+                        storage_path,
+                        digest,
+                        raw_text,
+                        json.dumps(document_metadata),
+                    ),
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, 'parsed', %s)
-                RETURNING id
-                """,
-                (
-                    source_id,
-                    title,
-                    file.filename,
-                    file.content_type or "application/pdf",
-                    storage_path,
-                    digest,
-                    raw_text,
-                ),
-            )
+            except psycopg.errors.UniqueViolation as exc:
+                if exc.diag.constraint_name != "documents_sha256_key":
+                    raise
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "document_already_exists",
+                        "sha256": digest,
+                    },
+                ) from exc
             document_id = cur.fetchone()["id"]
 
             cur.execute(
@@ -1109,8 +1161,19 @@ async def ingest_pdf(
                 (
                     "ingestion",
                     "succeeded",
-                    json.dumps({"filename": file.filename, "source_code": source_code}),
-                    json.dumps({"document_id": str(document_id)}),
+                    json.dumps(
+                        {
+                            "filename": file.filename,
+                            "source_code": source_code,
+                            "extraction_status": extraction.status,
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "document_id": str(document_id),
+                            "extraction": document_metadata["extraction"],
+                        }
+                    ),
                 ),
             )
             run_id = cur.fetchone()["id"]
@@ -1120,6 +1183,35 @@ async def ingest_pdf(
         source_id=source_id,
         document_id=document_id,
         status=RunStatus.succeeded,
+    )
+
+
+@router.get("/documents/{document_id}/extraction", response_model=DocumentExtractionRead)
+async def get_document_extraction(document_id: UUID) -> DocumentExtractionRead:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, title, metadata
+                FROM documents
+                WHERE id = %s
+                """,
+                (document_id,),
+            )
+            document = cur.fetchone()
+
+    if document is None:
+        raise ValueError(f"Document not found: {document_id}")
+
+    metadata = document["metadata"] or {}
+    extraction = metadata.get("extraction") or {}
+    pages = metadata.get("extracted_pages") or []
+
+    return DocumentExtractionRead(
+        document_id=document["id"],
+        title=document["title"],
+        extraction=ExtractionReportRead(**extraction),
+        pages=[ExtractedPageRead(**page) for page in pages],
     )
 
 

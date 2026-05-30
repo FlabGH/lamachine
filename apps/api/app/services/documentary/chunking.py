@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 
 PAGE_RE = re.compile(r"\[PAGE (?P<page>\d+)\]")
+SECTION_RE = re.compile(r"\[SECTION (?P<section>[^\]]+)\]")
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,14 @@ def detect_page_range(text: str) -> tuple[int | None, int | None]:
     return min(pages), max(pages)
 
 
+def detect_section_title(text: str) -> str | None:
+    matches = [m.group("section").strip() for m in SECTION_RE.finditer(text)]
+    matches = [section for section in matches if section]
+    if len(set(matches)) == 1:
+        return matches[0]
+    return None
+
+
 def chunk_text(
     text: str,
     *,
@@ -52,6 +61,14 @@ def chunk_text(
         end = min(start + chunk_size_words, len(words))
         content = " ".join(words[start:end]).strip()
         page_start, page_end = detect_page_range(content)
+        section_title = detect_section_title(content)
+        metadata = {
+            "chunking_strategy": "word_window_v1",
+            "chunk_size_words": chunk_size_words,
+            "chunk_overlap_words": chunk_overlap_words,
+        }
+        if section_title:
+            metadata["section_title"] = section_title
 
         chunks.append(
             TextChunk(
@@ -61,11 +78,7 @@ def chunk_text(
                 page_start=page_start,
                 page_end=page_end,
                 token_count=estimate_tokens(content),
-                metadata={
-                    "chunking_strategy": "word_window_v1",
-                    "chunk_size_words": chunk_size_words,
-                    "chunk_overlap_words": chunk_overlap_words,
-                },
+                metadata=metadata,
             )
         )
 

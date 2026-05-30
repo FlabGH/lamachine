@@ -30,3 +30,6 @@ postgres_data/
 qdrant_data/
 
 .DS_Store
+
+corpus/poc_ia/files/*
+!corpus/poc_ia/files/.gitkeep
