@@ -7,7 +7,7 @@ CREATE TYPE output_status AS ENUM ('draft', 'fact_validated', 'politically_valid
 
 CREATE TABLE sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
+    code TEXT NOT NULL,
     source_type TEXT NOT NULL, -- pdf, text, url_later, manual_note
     origin TEXT,
     author TEXT,

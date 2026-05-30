@@ -1,0 +1,38 @@
+documents:
+  - file: programme-rn-ia.pdf
+    title: Programme RN IA
+    source_code: rn
+    role_documentaire: opposition
+    famille_politique: extreme_droite
+    positionnement: adversaire
+    niveau_confiance: eleve
+    type_document: programme_politique
+    usage_probatoire: position_officielle
+    statut_metadonnees: valide_humain
+    mode_qualification: manuel
+    qualification_confidence: 0.9
+    qualification_rationale: Source officielle représentant une position adverse.
+    validated_by: redaction
+    validated_at: null
+    theme_tags:
+      - ia
+      - travail
+
+  - file: rapport-public-ia-travail.pdf
+    title: Rapport public IA et travail
+    source_code: france_travail
+    role_documentaire: source_factuelle
+    famille_politique: institutionnel
+    positionnement: contextuel
+    niveau_confiance: moyen
+    type_document: rapport_institutionnel
+    usage_probatoire: contexte
+    statut_metadonnees: brouillon
+    mode_qualification: manuel
+    qualification_confidence: 0.7
+    qualification_rationale: Document de contexte à vérifier avant validation humaine.
+    validated_by: pending
+    validated_at: null
+    theme_tags:
+      - ia
+      - emploi

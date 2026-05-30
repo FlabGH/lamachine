@@ -71,7 +71,7 @@ class OutputPersona(str, Enum):
 
 
 class SourceCreate(BaseModel):
-    name: str
+    code: str
     source_type: str = Field(examples=["pdf", "text"])
     origin: str | None = None
     author: str | None = None
@@ -178,7 +178,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     documents.source_id,
                     documents.title AS document_title,
                     documents.raw_text,
-                    sources.name AS source_name
+                    sources.code AS source_code
                 FROM documents
                 JOIN sources ON sources.id = documents.source_id
                 WHERE documents.id = %s
@@ -300,7 +300,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     source_id=document["source_id"],
                     document_id=payload.document_id,
                     document_title=document["document_title"],
-                    source_name=document["source_name"],
+                    source_code=document["source_code"],
                     content_sha256=chunk.content_sha256,
                     index_version_id=payload.index_version_id,
                     vector_collection=index_version["vector_collection"],
@@ -396,7 +396,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     source_id=document["source_id"],
                     document_id=payload.document_id,
                     document_title=document["document_title"],
-                    source_name=document["source_name"],
+                    source_code=document["source_code"],
                     content_sha256=chunk.content_sha256,
                     index_version_id=payload.index_version_id,
                     vector_collection=index_version["vector_collection"],
@@ -1058,24 +1058,24 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
 @router.post("/documents/pdf", response_model=IngestionResponse)
 async def ingest_pdf(
     file: UploadFile = File(...),
-    source_name: str = Form(...),
+    source_code: str = Form(...),
     origin: str | None = Form(default=None),
     author: str | None = Form(default=None),
 ) -> IngestionResponse:
     content = await file.read()
     storage_path, digest = save_uploaded_file(file.filename or "upload.pdf", content)
     raw_text = extract_pdf_text(storage_path)
-    title = file.filename or source_name
+    title = file.filename or source_code
 
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO sources (name, source_type, origin, author)
+                INSERT INTO sources (code, source_type, origin, author)
                 VALUES (%s, 'pdf', %s, %s)
                 RETURNING id
                 """,
-                (source_name, origin, author),
+                (source_code, origin, author),
             )
             source_id = cur.fetchone()["id"]
 
@@ -1109,7 +1109,7 @@ async def ingest_pdf(
                 (
                     "ingestion",
                     "succeeded",
-                    json.dumps({"filename": file.filename, "source_name": source_name}),
+                    json.dumps({"filename": file.filename, "source_code": source_code}),
                     json.dumps({"document_id": str(document_id)}),
                 ),
             )
@@ -1127,7 +1127,7 @@ async def ingest_pdf(
 async def ingest_text(
     title: str = Form(...),
     text: str = Form(...),
-    source_name: str = Form(...),
+    source_code: str = Form(...),
     origin: str | None = Form(default=None),
     author: str | None = Form(default=None),
 ) -> IngestionResponse:
@@ -1138,11 +1138,11 @@ async def ingest_text(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO sources (name, source_type, origin, author)
+                INSERT INTO sources (code, source_type, origin, author)
                 VALUES (%s, 'text', %s, %s)
                 RETURNING id
                 """,
-                (source_name, origin, author),
+                (source_code, origin, author),
             )
             source_id = cur.fetchone()["id"]
 
@@ -1168,7 +1168,7 @@ async def ingest_text(
                 (
                     "ingestion",
                     "succeeded",
-                    json.dumps({"title": title, "source_name": source_name}),
+                    json.dumps({"title": title, "source_code": source_code}),
                     json.dumps({"document_id": str(document_id)}),
                 ),
             )

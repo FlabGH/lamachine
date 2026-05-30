@@ -4,14 +4,14 @@
 
 INSERT INTO sources (
     id,
-    name,
+    code,
     source_type,
     origin,
     author
 )
 VALUES (
     '10000000-0000-0000-0000-000000000001',
-    'Source fictive Phase 3',
+    'source_fictive_phase_3',
     'text',
     'fixture',
     'LaMachine POC'
@@ -93,7 +93,9 @@ VALUES
         "source_id": "10000000-0000-0000-0000-000000000001",
         "document_id": "10000000-0000-0000-0000-000000000002",
         "document_title": "Document fictif Phase 3",
-        "source_name": "Source fictive Phase 3",
+        "source_code": "source_fictive_phase_3",
+        "role_documentaire": "source_factuelle",
+        "statut_metadonnees": "brouillon",
         "page_start": 1,
         "page_end": 1,
         "content_sha256": "phase3-step1-chunk-0-sha256",
@@ -115,7 +117,9 @@ VALUES
         "source_id": "10000000-0000-0000-0000-000000000001",
         "document_id": "10000000-0000-0000-0000-000000000002",
         "document_title": "Document fictif Phase 3",
-        "source_name": "Source fictive Phase 3",
+        "source_code": "source_fictive_phase_3",
+        "role_documentaire": "source_factuelle",
+        "statut_metadonnees": "brouillon",
         "section": "body",
         "content_sha256": "phase3-step1-chunk-1-sha256",
         "index_version_id": "10000000-0000-0000-0000-000000000003",
