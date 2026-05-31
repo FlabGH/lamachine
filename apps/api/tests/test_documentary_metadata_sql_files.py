@@ -22,6 +22,10 @@ def test_initial_schema_uses_source_code_column():
 
     assert "CREATE TABLE sources" in sql
     assert "code TEXT NOT NULL" in sql
+    assert "chunking_version TEXT NOT NULL" in sql
+    assert "split_strategy TEXT NOT NULL" in sql
+    assert "min_chunk_size INTEGER NOT NULL" in sql
+    assert "max_chunk_size INTEGER NOT NULL" in sql
     assert "name TEXT NOT NULL" not in sql.split("CREATE TABLE documents", 1)[0]
 
 
@@ -45,8 +49,12 @@ def test_documentary_metadata_fixture_contains_minimal_contract_keys():
         "role_documentaire",
         "statut_metadonnees",
         "content_sha256",
+        "content_hash",
         "index_version_id",
         "vector_collection",
+        "chunking_version",
+        "split_strategy",
+        "parent_document_id",
     ):
         assert f'"{key}"' in sql
 
@@ -64,3 +72,7 @@ def test_documentary_metadata_audit_queries_include_enriched_contract_keys():
 
     assert "role_documentaire" in sql
     assert "statut_metadonnees" in sql
+    assert "chunking_version" in sql
+    assert "split_strategy" in sql
+    assert "parent_document_id" in sql
+    assert "content_hash" in sql

@@ -49,7 +49,11 @@ def _metadata(**overrides):
         "vector_collection": "test_collection",
         "page_start": 1,
         "page_end": 2,
-        "extra": {"chunking_strategy": "word_window_v1"},
+        "extra": {
+            "chunking_strategy": "word_window_v1",
+            "chunking_version": "word_window_v1",
+            "split_strategy": "word_window",
+        },
     }
     data.update(overrides)
     return build_chunk_metadata(**data)
@@ -60,12 +64,16 @@ def test_build_chunk_metadata_serializes_ids_and_keeps_pages():
 
     assert metadata["source_id"] == str(SOURCE_ID)
     assert metadata["document_id"] == str(DOCUMENT_ID)
+    assert metadata["parent_document_id"] == str(DOCUMENT_ID)
     assert metadata["index_version_id"] == str(INDEX_VERSION_ID)
     assert metadata["document_title"] == "Document fictif"
     assert metadata["source_code"] == "source_fictive"
+    assert metadata["content_hash"] == "abc123"
     assert metadata["page_start"] == 1
     assert metadata["page_end"] == 2
     assert metadata["chunking_strategy"] == "word_window_v1"
+    assert metadata["chunking_version"] == "word_window_v1"
+    assert metadata["split_strategy"] == "word_window"
 
 
 def test_build_chunk_metadata_adds_body_section_when_no_page_is_available():
@@ -120,6 +128,8 @@ def test_build_qdrant_payload_contains_chunk_id_and_contract_metadata():
     assert payload["document_title"] == "Document fictif"
     assert payload["source_code"] == "source_fictive"
     assert payload["content_sha256"] == "abc123"
+    assert payload["content_hash"] == "abc123"
+    assert payload["chunking_version"] == "word_window_v1"
 
 
 def test_normalize_document_metadata_accepts_valid_role_documentaire():

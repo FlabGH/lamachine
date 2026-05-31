@@ -102,8 +102,12 @@ CRITICAL_CHUNK_METADATA_KEYS = {
     "document_title",
     "source_code",
     "content_sha256",
+    "content_hash",
     "index_version_id",
     "vector_collection",
+    "chunking_version",
+    "split_strategy",
+    "parent_document_id",
 }
 
 
@@ -234,6 +238,7 @@ def build_chunk_metadata(
     content_sha256: str,
     index_version_id: Any,
     vector_collection: str,
+    parent_document_id: Any | None = None,
     page_start: int | None = None,
     page_end: int | None = None,
     section: str | None = None,
@@ -243,9 +248,11 @@ def build_chunk_metadata(
         **(extra or {}),
         "source_id": str(source_id),
         "document_id": str(document_id),
+        "parent_document_id": str(parent_document_id or document_id),
         "document_title": document_title,
         "source_code": source_code,
         "content_sha256": content_sha256,
+        "content_hash": content_sha256,
         "index_version_id": str(index_version_id),
         "vector_collection": vector_collection,
     }

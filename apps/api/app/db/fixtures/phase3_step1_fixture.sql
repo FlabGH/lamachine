@@ -48,8 +48,12 @@ INSERT INTO index_versions (
     embedding_dimension,
     vector_collection,
     chunking_strategy,
+    chunking_version,
+    split_strategy,
     chunk_size,
     chunk_overlap,
+    min_chunk_size,
+    max_chunk_size,
     is_active
 )
 VALUES (
@@ -60,8 +64,12 @@ VALUES (
     384,
     'phase3_step1_fixture',
     'word_window_v1',
+    'word_window_v1',
+    'word_window',
     80,
     10,
+    20,
+    120,
     false
 )
 ON CONFLICT (name) DO NOTHING;
@@ -92,6 +100,7 @@ VALUES
     '{
         "source_id": "10000000-0000-0000-0000-000000000001",
         "document_id": "10000000-0000-0000-0000-000000000002",
+        "parent_document_id": "10000000-0000-0000-0000-000000000002",
         "document_title": "Document fictif Phase 3",
         "source_code": "source_fictive_phase_3",
         "role_documentaire": "source_factuelle",
@@ -99,8 +108,11 @@ VALUES
         "page_start": 1,
         "page_end": 1,
         "content_sha256": "phase3-step1-chunk-0-sha256",
+        "content_hash": "phase3-step1-chunk-0-sha256",
         "index_version_id": "10000000-0000-0000-0000-000000000003",
-        "vector_collection": "phase3_step1_fixture"
+        "vector_collection": "phase3_step1_fixture",
+        "chunking_version": "word_window_v1",
+        "split_strategy": "word_window"
     }'::jsonb
 ),
 (
@@ -116,14 +128,18 @@ VALUES
     '{
         "source_id": "10000000-0000-0000-0000-000000000001",
         "document_id": "10000000-0000-0000-0000-000000000002",
+        "parent_document_id": "10000000-0000-0000-0000-000000000002",
         "document_title": "Document fictif Phase 3",
         "source_code": "source_fictive_phase_3",
         "role_documentaire": "source_factuelle",
         "statut_metadonnees": "brouillon",
         "section": "body",
         "content_sha256": "phase3-step1-chunk-1-sha256",
+        "content_hash": "phase3-step1-chunk-1-sha256",
         "index_version_id": "10000000-0000-0000-0000-000000000003",
-        "vector_collection": "phase3_step1_fixture"
+        "vector_collection": "phase3_step1_fixture",
+        "chunking_version": "word_window_v1",
+        "split_strategy": "word_window"
     }'::jsonb
 )
 ON CONFLICT (document_id, index_version_id, chunk_index) DO NOTHING;

@@ -18,7 +18,7 @@ from app.services.documentary.ingestion import (
     sha256_bytes,
 )
 
-from app.services.documentary.chunking import chunk_text
+from app.services.documentary.chunking import ChunkingConfig, chunk_text
 from app.services.documentary.metadata_contract import (
     build_chunk_metadata,
     build_qdrant_payload,
@@ -126,6 +126,34 @@ class IndexRequest(BaseModel):
     index_version_id: UUID
 
 
+class ChunkingPreviewRequest(BaseModel):
+    index_version_id: UUID | None = None
+    chunk_size: int | None = None
+    chunk_overlap: int | None = None
+    split_strategy: str | None = None
+    min_chunk_size: int | None = None
+    max_chunk_size: int | None = None
+    chunking_version: str | None = None
+
+
+class ChunkingPreviewChunk(BaseModel):
+    chunk_index: int
+    content: str
+    content_hash: str
+    page_start: int | None = None
+    page_end: int | None = None
+    section_title: str | None = None
+    token_count: int
+    metadata: dict = Field(default_factory=dict)
+
+
+class ChunkingPreviewResponse(BaseModel):
+    document_id: UUID
+    document_title: str
+    chunking_config: dict
+    chunks: list[ChunkingPreviewChunk]
+
+
 class RunRead(BaseModel):
     id: UUID
     run_type: str
@@ -198,6 +226,33 @@ def _chunk_document_metadata(document_metadata: dict | None) -> dict:
     }
 
 
+def _chunking_config_from_index_version(index_version: dict) -> ChunkingConfig:
+    return ChunkingConfig.from_index_version(index_version)
+
+
+def _chunking_config_for_preview(
+    payload: ChunkingPreviewRequest,
+    index_version: dict | None,
+) -> ChunkingConfig:
+    base = (
+        _chunking_config_from_index_version(index_version)
+        if index_version
+        else ChunkingConfig()
+    )
+    return ChunkingConfig(
+        chunk_size=payload.chunk_size or base.chunk_size,
+        chunk_overlap=(
+            payload.chunk_overlap
+            if payload.chunk_overlap is not None
+            else base.chunk_overlap
+        ),
+        split_strategy=payload.split_strategy or base.split_strategy,
+        min_chunk_size=payload.min_chunk_size or base.min_chunk_size,
+        max_chunk_size=payload.max_chunk_size or base.max_chunk_size,
+        chunking_version=payload.chunking_version or base.chunking_version,
+    )
+
+
 
 @router.post("/index", response_model=RunRead)
 async def index_document(payload: IndexRequest) -> RunRead:
@@ -247,11 +302,8 @@ async def index_document(payload: IndexRequest) -> RunRead:
                 )
 
             raw_text = document["raw_text"] or ""
-            chunks = chunk_text(
-                raw_text,
-                chunk_size_words=index_version["chunk_size"],
-                chunk_overlap_words=index_version["chunk_overlap"],
-            )
+            chunking_config = _chunking_config_from_index_version(index_version)
+            chunks = chunk_text(raw_text, config=chunking_config)
 
             cur.execute(
                 """
@@ -281,8 +333,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                             "embedding_provider": embedding_client.provider,
                             "embedding_model": embedding_client.model,
                             "embedding_dimension": embedding_client.dimension,
-                            "chunk_size": index_version["chunk_size"],
-                            "chunk_overlap": index_version["chunk_overlap"],
+                            "chunking": chunking_config.metadata(),
                         }
                     ),
                     json.dumps({}),
@@ -322,6 +373,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                             "texts_count": len(chunks),
                             "index_version_id": str(payload.index_version_id),
                             "vector_collection": index_version["vector_collection"],
+                            "chunking": chunking_config.metadata(),
                         }
                     ),
                     json.dumps(_adapter_response_metadata(embedding_client)),
@@ -414,6 +466,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                             "texts_count": len(inserted_chunks),
                             "index_version_id": str(payload.index_version_id),
                             "vector_collection": index_version["vector_collection"],
+                            "chunking": chunking_config.metadata(),
                         }
                     ),
                     model_call_id,
@@ -501,6 +554,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                             "embedding_model": embedding_client.model,
                             "embedding_dimension": embedding_client.dimension,
                             "model_call_id": str(model_call_id),
+                            "chunking": chunking_config.metadata(),
                         }
                     ),
                     run_id,
@@ -512,6 +566,67 @@ async def index_document(payload: IndexRequest) -> RunRead:
         run_type="indexing",
         status=RunStatus.succeeded,
     )
+
+
+@router.post(
+    "/documents/{document_id}/chunking/preview",
+    response_model=ChunkingPreviewResponse,
+)
+async def preview_document_chunking(
+    document_id: UUID,
+    payload: ChunkingPreviewRequest,
+) -> ChunkingPreviewResponse:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, title, raw_text
+                FROM documents
+                WHERE id = %s
+                """,
+                (document_id,),
+            )
+            document = cur.fetchone()
+            if document is None:
+                raise ValueError(f"Document not found: {document_id}")
+
+            index_version = None
+            if payload.index_version_id is not None:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM index_versions
+                    WHERE id = %s
+                    """,
+                    (payload.index_version_id,),
+                )
+                index_version = cur.fetchone()
+                if index_version is None:
+                    raise ValueError(
+                        f"Index version not found: {payload.index_version_id}"
+                    )
+
+    chunking_config = _chunking_config_for_preview(payload, index_version)
+    chunks = chunk_text(document["raw_text"] or "", config=chunking_config)
+    return ChunkingPreviewResponse(
+        document_id=document_id,
+        document_title=document["title"],
+        chunking_config=chunking_config.metadata(),
+        chunks=[
+            ChunkingPreviewChunk(
+                chunk_index=chunk.chunk_index,
+                content=chunk.content,
+                content_hash=chunk.content_sha256,
+                page_start=chunk.page_start,
+                page_end=chunk.page_end,
+                section_title=chunk.metadata.get("section_title"),
+                token_count=chunk.token_count,
+                metadata=chunk.metadata,
+            )
+            for chunk in chunks
+        ],
+    )
+
 
 @router.post("/search", response_model=SearchResponse)
 async def search_documents(payload: SearchRequest) -> SearchResponse:

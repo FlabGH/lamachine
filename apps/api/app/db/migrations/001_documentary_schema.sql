@@ -38,8 +38,12 @@ CREATE TABLE index_versions (
     embedding_dimension INTEGER NOT NULL,
     vector_collection TEXT NOT NULL,
     chunking_strategy TEXT NOT NULL,
+    chunking_version TEXT NOT NULL,
+    split_strategy TEXT NOT NULL,
     chunk_size INTEGER NOT NULL,
     chunk_overlap INTEGER NOT NULL,
+    min_chunk_size INTEGER NOT NULL,
+    max_chunk_size INTEGER NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
