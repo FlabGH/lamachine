@@ -92,9 +92,11 @@ if [[ "$REMOTE_REBUILD_DB" == "1" ]]; then
     for compose_file in $REMOTE_DOCKER_COMPOSE_FILES; do
       compose_args+=("-f" "\$compose_file")
     done
-    docker compose "\${compose_args[@]}" exec -T postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "\$POSTGRES_USER" -d postgres -c "DROP DATABASE IF EXISTS \"\$POSTGRES_DB\" WITH (FORCE);" -c "CREATE DATABASE \"\$POSTGRES_DB\" OWNER \"\$POSTGRES_USER\";"'
-    docker compose "\${compose_args[@]}" exec -T postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "\$POSTGRES_USER" -d "\$POSTGRES_DB"' < apps/api/app/db/migrations/001_documentary_schema.sql
-    docker compose "\${compose_args[@]}" exec -T postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "\$POSTGRES_USER" -d "\$POSTGRES_DB"' < apps/api/app/db/migrations/002_documentary_metadata_contract.sql
+    db_user=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_USER)
+    db_name=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_DB)
+    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d postgres -c "DROP DATABASE IF EXISTS \"\$db_name\" WITH (FORCE);" -c "CREATE DATABASE \"\$db_name\" OWNER \"\$db_user\";"
+    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" < apps/api/app/db/migrations/001_documentary_schema.sql
+    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" < apps/api/app/db/migrations/002_documentary_metadata_contract.sql
 REMOTE
 else
   echo "5) Skipping remote database rebuild"
@@ -109,7 +111,9 @@ if [[ "$REMOTE_APPLY_FIXTURE" == "1" ]]; then
     for compose_file in $REMOTE_DOCKER_COMPOSE_FILES; do
       compose_args+=("-f" "\$compose_file")
     done
-    docker compose "\${compose_args[@]}" exec -T postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "\$POSTGRES_USER" -d "\$POSTGRES_DB"' < apps/api/app/db/fixtures/phase3_step1_fixture.sql
+    db_user=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_USER)
+    db_name=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_DB)
+    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" < apps/api/app/db/fixtures/phase3_step1_fixture.sql
 REMOTE
 else
   echo "6) Skipping remote fixture load"
@@ -143,7 +147,9 @@ if [[ "$REMOTE_RUN_AUDIT" == "1" ]]; then
     for compose_file in $REMOTE_DOCKER_COMPOSE_FILES; do
       compose_args+=("-f" "\$compose_file")
     done
-    docker compose "\${compose_args[@]}" exec -T postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "\$POSTGRES_USER" -d "\$POSTGRES_DB"' < apps/api/app/db/queries/audit_documentary_metadata.sql
+    db_user=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_USER)
+    db_name=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_DB)
+    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" < apps/api/app/db/queries/audit_documentary_metadata.sql
 REMOTE
 else
   echo "8) Skipping remote documentary metadata audit"
