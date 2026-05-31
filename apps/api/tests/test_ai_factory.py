@@ -3,9 +3,15 @@ import asyncio
 import pytest
 
 from app.services.ai.clients import LLMMessage, RerankCandidate, RerankResult
-from app.services.ai.factory import get_embedding_client, get_llm_client, get_reranker_client
+from app.services.ai.factory import (
+    get_embedding_client,
+    get_llm_client,
+    get_ocr_client,
+    get_reranker_client,
+)
 from app.services.ai.embedding_adapters import MistralEmbeddingClient
 from app.services.ai.llm_adapters import MistralLLMClient
+from app.services.ai.ocr_adapters import MistralOcrClient, NoopOcrClient
 from app.services.ai.reranker_adapters import JinaRerankerClient
 
 
@@ -154,6 +160,27 @@ class TestAIClientFactory:
 
         assert llm_client.provider == "local"
         assert reranker_client.provider == "local"
+
+    def test_default_ocr_client_is_noop(self):
+        client = get_ocr_client()
+
+        assert isinstance(client, NoopOcrClient)
+        assert client.provider == "noop"
+        assert client.enabled is False
+
+    def test_ocr_client_can_be_selected_from_env(self, monkeypatch):
+        monkeypatch.setenv("OCR_PROVIDER", "mistral")
+        monkeypatch.setenv("MISTRAL_OCR_MODEL", "mistral-ocr-latest")
+
+        client = get_ocr_client()
+
+        assert isinstance(client, MistralOcrClient)
+        assert client.provider == "mistral"
+        assert client.model == "mistral-ocr-latest"
+
+    def test_unknown_ocr_provider_raises(self):
+        with pytest.raises(ValueError, match="Unknown OCR provider"):
+            get_ocr_client(provider="unknown")
 
     def test_llm_client_can_be_selected_from_env(self, monkeypatch):
         monkeypatch.setenv("LLM_PROVIDER", "mistral")

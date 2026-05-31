@@ -12,7 +12,7 @@ import json
 
 from app.db import get_connection
 from app.services.documentary.ingestion import (
-    extract_pdf,
+    extract_pdf_with_optional_ocr,
     normalize_text,
     save_uploaded_file,
     sha256_bytes,
@@ -28,7 +28,12 @@ from app.services.documentary.metadata_contract import (
     build_qdrant_payload,
 )
 
-from app.services.ai.factory import get_embedding_client, get_reranker_client, get_llm_client
+from app.services.ai.factory import (
+    get_embedding_client,
+    get_llm_client,
+    get_ocr_client,
+    get_reranker_client,
+)
 from app.services.ai.presets import get_ai_backend_preset_name
 from app.services.documentary.vector_store import (
     ensure_collection,
@@ -111,6 +116,11 @@ class ExtractedPageRead(BaseModel):
 class ExtractionReportRead(BaseModel):
     method: str | None = None
     status: str | None = None
+    ocr_used: bool = False
+    ocr_provider: str | None = None
+    ocr_model: str | None = None
+    ocr_trigger_reason: str | None = None
+    ocr_pages_processed: int = 0
     page_count: int | None = None
     pages_with_text: int | None = None
     empty_pages: list[int] = Field(default_factory=list)
@@ -1263,7 +1273,10 @@ async def ingest_pdf(
 ) -> IngestionResponse:
     content = await file.read()
     storage_path, digest = save_uploaded_file(file.filename or "upload.pdf", content)
-    extraction = extract_pdf(storage_path)
+    extraction = await extract_pdf_with_optional_ocr(
+        storage_path,
+        ocr_client=get_ocr_client(),
+    )
     raw_text = extraction.raw_text
     title = file.filename or source_code
     document_metadata = extraction.metadata()

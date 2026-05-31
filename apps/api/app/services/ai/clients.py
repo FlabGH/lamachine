@@ -53,6 +53,21 @@ class RerankResult:
     rank: int
 
 
+@dataclass(frozen=True)
+class OcrPage:
+    page: int
+    text: str
+
+
+@dataclass(frozen=True)
+class OcrResult:
+    pages: list[OcrPage]
+    provider: str
+    model: str
+    pages_processed: int
+    raw: dict[str, Any] | None = None
+
+
 class LLMClient(Protocol):
     provider: str
     model: str
@@ -94,4 +109,18 @@ class RerankerClient(Protocol):
         top_k: int | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> list[RerankResult]:
+        ...
+
+
+class OcrClient(Protocol):
+    provider: str
+    model: str
+    enabled: bool
+
+    async def extract_pdf(
+        self,
+        path: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> OcrResult:
         ...

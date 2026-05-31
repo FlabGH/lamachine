@@ -4,6 +4,7 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
+from app.services.ai.clients import OcrPage, OcrResult
 from app.api.documentary import _chunk_document_metadata
 from app.api import documentary
 from app.services.documentary import ingestion
@@ -96,6 +97,110 @@ def test_extract_pdf_records_page_errors(monkeypatch):
     assert result.empty_pages == [2]
     assert result.errors
     assert "page_2: RuntimeError: broken page" in result.errors
+
+
+def test_extract_pdf_with_optional_ocr_skips_ocr_on_success(monkeypatch):
+    class FakeOcrClient:
+        provider = "fake"
+        model = "fake-ocr"
+        enabled = True
+
+        async def extract_pdf(self, path, *, metadata=None):
+            raise AssertionError("OCR should not be called")
+
+    monkeypatch.setattr(ingestion, "PdfReader", _reader_with_pages(["Texte utile."]))
+
+    result = asyncio.run(
+        ingestion.extract_pdf_with_optional_ocr(
+            "/tmp/fake.pdf",
+            ocr_client=FakeOcrClient(),
+        )
+    )
+
+    assert result.status == "success"
+    assert result.ocr_used is False
+    assert result.ocr_trigger_reason is None
+
+
+def test_extract_pdf_with_optional_ocr_keeps_pypdf_result_when_ocr_disabled(monkeypatch):
+    class NoopOcrClient:
+        provider = "noop"
+        model = "ocr-disabled"
+        enabled = False
+
+    monkeypatch.setattr(ingestion, "PdfReader", _reader_with_pages([""]))
+
+    result = asyncio.run(
+        ingestion.extract_pdf_with_optional_ocr(
+            "/tmp/fake.pdf",
+            ocr_client=NoopOcrClient(),
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.ocr_used is False
+    assert result.ocr_provider == "noop"
+    assert result.ocr_trigger_reason == "possible_scan_or_empty_text"
+
+
+def test_extract_pdf_with_optional_ocr_uses_ocr_for_weak_pdf(monkeypatch, tmp_path):
+    class FakeOcrClient:
+        provider = "fake"
+        model = "fake-ocr"
+        enabled = True
+
+        async def extract_pdf(self, path, *, metadata=None):
+            assert metadata == {
+                "trigger_reason": "possible_scan_or_empty_text",
+                "original_path": str(pdf_path),
+            }
+            return OcrResult(
+                pages=[OcrPage(page=1, text="Titre OCR\nTexte reconnu.")],
+                provider=self.provider,
+                model=self.model,
+                pages_processed=1,
+            )
+
+    pdf_path = tmp_path / "scan.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7\nscan\n%%EOF")
+    monkeypatch.setattr(ingestion, "PdfReader", _reader_with_pages([""]))
+
+    result = asyncio.run(
+        ingestion.extract_pdf_with_optional_ocr(
+            str(pdf_path),
+            ocr_client=FakeOcrClient(),
+        )
+    )
+    metadata = result.metadata()["extraction"]
+
+    assert result.status == "success"
+    assert result.method == "pypdf.extract_text+fake.ocr"
+    assert result.ocr_used is True
+    assert result.ocr_provider == "fake"
+    assert result.ocr_model == "fake-ocr"
+    assert result.ocr_pages_processed == 1
+    assert "[SECTION Titre OCR]" in result.raw_text
+    assert metadata["ocr_used"] is True
+    assert metadata["ocr_trigger_reason"] == "possible_scan_or_empty_text"
+
+
+def test_clean_pdf_for_ocr_repairs_multipart_envelope(tmp_path):
+    wrapped_pdf = (
+        b"--boundary\r\n"
+        b"Content-Disposition: form-data; name=\"file\"; filename=\"scan.pdf\"\r\n"
+        b"Content-Type: application/octet-stream\r\n\r\n"
+        b"%PDF-1.7\nbody\n%%EOF\r\n--boundary--"
+    )
+    wrapped_path = tmp_path / "wrapped.pdf"
+    wrapped_path.write_bytes(wrapped_pdf)
+
+    clean_path, warnings, errors = ingestion.clean_pdf_for_ocr(str(wrapped_path))
+
+    assert warnings == ["ocr_cleaned_multipart_pdf_envelope"]
+    assert errors == []
+    assert clean_path != str(wrapped_path)
+    assert (tmp_path / "wrapped.pdf").read_bytes().startswith(b"--boundary")
+    assert open(clean_path, "rb").read() == b"%PDF-1.7\nbody\n%%EOF"
 
 
 def test_chunk_text_preserves_page_range_and_section_title():
@@ -250,8 +355,12 @@ def test_ingest_pdf_returns_409_on_duplicate_sha256(monkeypatch):
         def cursor(self):
             return FakeCursor()
 
+    async def fake_extract_pdf_with_optional_ocr(path, *, ocr_client=None):
+        return FakeExtraction()
+
     monkeypatch.setattr(documentary, "save_uploaded_file", lambda filename, content: ("/tmp/duplicate.pdf", "digest"))
-    monkeypatch.setattr(documentary, "extract_pdf", lambda path: FakeExtraction())
+    monkeypatch.setattr(documentary, "extract_pdf_with_optional_ocr", fake_extract_pdf_with_optional_ocr)
+    monkeypatch.setattr(documentary, "get_ocr_client", lambda: None)
     monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection())
     monkeypatch.setattr(documentary.psycopg.errors, "UniqueViolation", FakeUniqueViolation)
 

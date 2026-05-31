@@ -5,6 +5,7 @@ from typing import Optional
 
 from app.services.ai.embedding_adapters import HashEmbeddingClient, MistralEmbeddingClient
 from app.services.ai.llm_adapters import ExtractiveNoteLLMClient, MistralLLMClient
+from app.services.ai.ocr_adapters import MistralOcrClient, NoopOcrClient
 from app.services.ai.presets import resolve_ai_backend_preset
 from app.services.ai.reranker_adapters import JinaRerankerClient, LexicalOverlapReranker
 
@@ -86,3 +87,16 @@ def get_llm_client(provider: Optional[str] = None, model: Optional[str] = None):
         return MistralLLMClient(model=model)
 
     raise ValueError(f"Unknown LLM provider: {provider}")
+
+
+def get_ocr_client(provider: Optional[str] = None, model: Optional[str] = None):
+    """Return an OcrClient instance. OCR is disabled unless explicitly configured."""
+    provider = _normalize_provider(provider or os.getenv("OCR_PROVIDER"))
+
+    if not provider or provider in {"disabled", "noop", "local"}:
+        return NoopOcrClient()
+
+    if provider == "mistral":
+        return MistralOcrClient(model=model)
+
+    raise ValueError(f"Unknown OCR provider: {provider}")
