@@ -100,6 +100,12 @@ if [[ "$REMOTE_REBUILD_DB" == "1" ]]; then
     docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -f /tmp/001_documentary_schema.sql < /dev/null
     docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -f /tmp/002_documentary_metadata_contract.sql < /dev/null
     docker compose "\${compose_args[@]}" exec -T postgres rm -f /tmp/001_documentary_schema.sql /tmp/002_documentary_metadata_contract.sql < /dev/null
+    schema_check=\$(docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -tA -F '|' -c "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sources' AND column_name = 'code'), EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sources' AND column_name = 'name'), (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE');" < /dev/null)
+    if [[ "\$schema_check" != "t|f|9" ]]; then
+      echo "ERROR: remote database schema assertion failed after rebuild: \$schema_check"
+      echo "Expected sources.code present, sources.name absent, and 9 public base tables."
+      exit 1
+    fi
 REMOTE
 else
   echo "5) Skipping remote database rebuild"
