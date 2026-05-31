@@ -26,6 +26,8 @@ def test_initial_schema_uses_source_code_column():
     assert "split_strategy TEXT NOT NULL" in sql
     assert "min_chunk_size INTEGER NOT NULL" in sql
     assert "max_chunk_size INTEGER NOT NULL" in sql
+    assert "UNIQUE (index_version_id, content_sha256)" in sql
+    assert "idx_chunks_content_sha256" in sql
     assert "name TEXT NOT NULL" not in sql.split("CREATE TABLE documents", 1)[0]
 
 
@@ -76,3 +78,5 @@ def test_documentary_metadata_audit_queries_include_enriched_contract_keys():
     assert "split_strategy" in sql
     assert "parent_document_id" in sql
     assert "content_hash" in sql
+    assert "duplicate_document_hash_groups" in sql
+    assert "duplicate_chunk_hash_groups" in sql

@@ -159,3 +159,16 @@ def chunk_text(
         start = end - chunking_config.chunk_overlap
 
     return chunks
+
+
+def deduplicate_chunks(chunks: list[TextChunk]) -> list[TextChunk]:
+    seen_hashes: set[str] = set()
+    unique_chunks: list[TextChunk] = []
+
+    for chunk in chunks:
+        if chunk.content_sha256 in seen_hashes:
+            continue
+        seen_hashes.add(chunk.content_sha256)
+        unique_chunks.append(chunk)
+
+    return unique_chunks

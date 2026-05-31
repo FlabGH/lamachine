@@ -18,7 +18,11 @@ from app.services.documentary.ingestion import (
     sha256_bytes,
 )
 
-from app.services.documentary.chunking import ChunkingConfig, chunk_text
+from app.services.documentary.chunking import (
+    ChunkingConfig,
+    chunk_text,
+    deduplicate_chunks,
+)
 from app.services.documentary.metadata_contract import (
     build_chunk_metadata,
     build_qdrant_payload,
@@ -303,7 +307,9 @@ async def index_document(payload: IndexRequest) -> RunRead:
 
             raw_text = document["raw_text"] or ""
             chunking_config = _chunking_config_from_index_version(index_version)
-            chunks = chunk_text(raw_text, config=chunking_config)
+            candidate_chunks = chunk_text(raw_text, config=chunking_config)
+            chunks = deduplicate_chunks(candidate_chunks)
+            chunks_skipped_duplicate = len(candidate_chunks) - len(chunks)
 
             cur.execute(
                 """
@@ -344,7 +350,8 @@ async def index_document(payload: IndexRequest) -> RunRead:
             embedding_input = {
                 "document_id": str(payload.document_id),
                 "index_version_id": str(payload.index_version_id),
-                "chunk_count": len(chunks),
+                "candidate_chunk_count": len(candidate_chunks),
+                "unique_chunk_count": len(chunks),
                 "content_hashes": [chunk.content_sha256 for chunk in chunks],
             }
 
@@ -371,6 +378,8 @@ async def index_document(payload: IndexRequest) -> RunRead:
                         {
                             "dimension": embedding_client.dimension,
                             "texts_count": len(chunks),
+                            "candidate_texts_count": len(candidate_chunks),
+                            "skipped_duplicate_texts_count": chunks_skipped_duplicate,
                             "index_version_id": str(payload.index_version_id),
                             "vector_collection": index_version["vector_collection"],
                             "chunking": chunking_config.metadata(),
@@ -418,6 +427,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                         metadata
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    ON CONFLICT (index_version_id, content_sha256) DO NOTHING
                     RETURNING id
                     """,
                     (
@@ -432,15 +442,21 @@ async def index_document(payload: IndexRequest) -> RunRead:
                         json.dumps(chunk_metadata),
                     ),
                 )
-                inserted_chunks.append((cur.fetchone()["id"], chunk))
+                inserted = cur.fetchone()
+                if inserted is None:
+                    chunks_skipped_duplicate += 1
+                    continue
+                inserted_chunks.append((inserted["id"], chunk))
 
-            embedding_result = await embedding_client.embed_texts(
-                [chunk.content for _, chunk in inserted_chunks],
-                metadata={
-                    "index_version_id": str(payload.index_version_id),
-                    "document_id": str(payload.document_id),
-                },
-            )
+            embedding_result = None
+            if inserted_chunks:
+                embedding_result = await embedding_client.embed_texts(
+                    [chunk.content for _, chunk in inserted_chunks],
+                    metadata={
+                        "index_version_id": str(payload.index_version_id),
+                        "document_id": str(payload.document_id),
+                    },
+                )
 
             cur.execute(
                 """
@@ -454,16 +470,34 @@ async def index_document(payload: IndexRequest) -> RunRead:
                         _adapter_response_metadata(
                             embedding_client,
                             {
-                                **(embedding_result.raw or {}),
-                                "dimension": embedding_result.dimension,
-                                "vectors_count": len(embedding_result.vectors),
+                                **(
+                                    (embedding_result.raw or {})
+                                    if embedding_result
+                                    else {}
+                                ),
+                                "dimension": (
+                                    embedding_result.dimension
+                                    if embedding_result
+                                    else embedding_client.dimension
+                                ),
+                                "vectors_count": (
+                                    len(embedding_result.vectors)
+                                    if embedding_result
+                                    else 0
+                                ),
                             },
                         )
                     ),
                     json.dumps(
                         {
-                            "dimension": embedding_result.dimension,
+                            "dimension": (
+                                embedding_result.dimension
+                                if embedding_result
+                                else embedding_client.dimension
+                            ),
                             "texts_count": len(inserted_chunks),
+                            "candidate_texts_count": len(candidate_chunks),
+                            "skipped_duplicate_texts_count": chunks_skipped_duplicate,
                             "index_version_id": str(payload.index_version_id),
                             "vector_collection": index_version["vector_collection"],
                             "chunking": chunking_config.metadata(),
@@ -473,59 +507,63 @@ async def index_document(payload: IndexRequest) -> RunRead:
                 ),
             )
 
-            qdrant = get_qdrant_client()
-            ensure_collection(
-                qdrant,
-                collection_name=index_version["vector_collection"],
-                vector_size=embedding_result.dimension,
-            )
-
-            points = []
-            for (chunk_id, chunk), vector in zip(inserted_chunks, embedding_result.vectors):
-                chunk_metadata = build_chunk_metadata(
-                    source_id=document["source_id"],
-                    document_id=payload.document_id,
-                    document_title=document["document_title"],
-                    source_code=document["source_code"],
-                    content_sha256=chunk.content_sha256,
-                    index_version_id=payload.index_version_id,
-                    vector_collection=index_version["vector_collection"],
-                    page_start=chunk.page_start,
-                    page_end=chunk.page_end,
-                    extra={
-                        **_chunk_document_metadata(document["document_metadata"]),
-                        **chunk.metadata,
-                        "embedding_provider": embedding_client.provider,
-                        "embedding_model": embedding_client.model,
-                        "embedding_dimension": embedding_result.dimension,
-                        "model_call_id": str(model_call_id),
-                    },
+            if embedding_result:
+                qdrant = get_qdrant_client()
+                ensure_collection(
+                    qdrant,
+                    collection_name=index_version["vector_collection"],
+                    vector_size=embedding_result.dimension,
                 )
-                points.append(
-                    (
-                        chunk_id,
-                        vector,
-                        build_qdrant_payload(
-                            chunk_id=chunk_id,
-                            chunk_metadata=chunk_metadata,
-                        ),
+
+                points = []
+                for (chunk_id, chunk), vector in zip(
+                    inserted_chunks,
+                    embedding_result.vectors,
+                ):
+                    chunk_metadata = build_chunk_metadata(
+                        source_id=document["source_id"],
+                        document_id=payload.document_id,
+                        document_title=document["document_title"],
+                        source_code=document["source_code"],
+                        content_sha256=chunk.content_sha256,
+                        index_version_id=payload.index_version_id,
+                        vector_collection=index_version["vector_collection"],
+                        page_start=chunk.page_start,
+                        page_end=chunk.page_end,
+                        extra={
+                            **_chunk_document_metadata(document["document_metadata"]),
+                            **chunk.metadata,
+                            "embedding_provider": embedding_client.provider,
+                            "embedding_model": embedding_client.model,
+                            "embedding_dimension": embedding_result.dimension,
+                            "model_call_id": str(model_call_id),
+                        },
                     )
-                )
+                    points.append(
+                        (
+                            chunk_id,
+                            vector,
+                            build_qdrant_payload(
+                                chunk_id=chunk_id,
+                                chunk_metadata=chunk_metadata,
+                            ),
+                        )
+                    )
 
-                cur.execute(
-                    """
-                    UPDATE document_chunks
-                    SET qdrant_point_id = %s
-                    WHERE id = %s
-                    """,
-                    (chunk_id, chunk_id),
-                )
+                    cur.execute(
+                        """
+                        UPDATE document_chunks
+                        SET qdrant_point_id = %s
+                        WHERE id = %s
+                        """,
+                        (chunk_id, chunk_id),
+                    )
 
-            upsert_chunks(
-                qdrant,
-                collection_name=index_version["vector_collection"],
-                points=points,
-            )
+                upsert_chunks(
+                    qdrant,
+                    collection_name=index_version["vector_collection"],
+                    points=points,
+                )
 
             cur.execute(
                 """
@@ -547,12 +585,20 @@ async def index_document(payload: IndexRequest) -> RunRead:
                 (
                     json.dumps(
                         {
-                            "chunks_created": len(chunks),
+                            "chunks_created": len(inserted_chunks),
+                            "chunks_inserted": len(inserted_chunks),
+                            "chunks_skipped_duplicate": chunks_skipped_duplicate,
+                            "unique_chunks_seen": len(chunks),
+                            "candidate_chunks_seen": len(candidate_chunks),
                             "ai_backend_preset": ai_backend_preset,
                             "vector_collection": index_version["vector_collection"],
                             "embedding_provider": embedding_client.provider,
                             "embedding_model": embedding_client.model,
-                            "embedding_dimension": embedding_client.dimension,
+                            "embedding_dimension": (
+                                embedding_result.dimension
+                                if embedding_result
+                                else embedding_client.dimension
+                            ),
                             "model_call_id": str(model_call_id),
                             "chunking": chunking_config.metadata(),
                         }

@@ -61,7 +61,8 @@ CREATE TABLE document_chunks (
     qdrant_point_id UUID,
     metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (document_id, index_version_id, chunk_index)
+    UNIQUE (document_id, index_version_id, chunk_index),
+    UNIQUE (index_version_id, content_sha256)
 );
 
 CREATE TABLE runs (
@@ -133,6 +134,7 @@ CREATE TABLE output_sources (
 CREATE INDEX idx_documents_source_id ON documents(source_id);
 CREATE INDEX idx_chunks_document_id ON document_chunks(document_id);
 CREATE INDEX idx_chunks_index_version_id ON document_chunks(index_version_id);
+CREATE INDEX idx_chunks_content_sha256 ON document_chunks(content_sha256);
 CREATE INDEX idx_chunks_qdrant_point_id ON document_chunks(qdrant_point_id);
 CREATE INDEX idx_runs_type_status ON runs(run_type, status);
 CREATE INDEX idx_model_calls_run_id ON model_calls(run_id);

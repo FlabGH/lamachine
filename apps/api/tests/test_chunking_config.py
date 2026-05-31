@@ -5,7 +5,11 @@ import pytest
 
 from app.api import documentary
 from app.api.documentary import ChunkingPreviewRequest
-from app.services.documentary.chunking import ChunkingConfig, chunk_text
+from app.services.documentary.chunking import (
+    ChunkingConfig,
+    chunk_text,
+    deduplicate_chunks,
+)
 
 
 def _words(count: int) -> str:
@@ -88,6 +92,25 @@ def test_chunking_absorbs_small_tail_when_max_size_allows_it():
 
     assert len(chunks) == 1
     assert chunks[0].token_count == 95
+
+
+def test_deduplicate_chunks_keeps_first_hash_occurrence():
+    chunks = chunk_text(
+        "alpha beta gamma delta alpha beta gamma delta",
+        config=ChunkingConfig(
+            chunk_size=4,
+            chunk_overlap=0,
+            min_chunk_size=1,
+            max_chunk_size=4,
+        ),
+    )
+
+    unique_chunks = deduplicate_chunks(chunks)
+
+    assert len(chunks) == 2
+    assert len(unique_chunks) == 1
+    assert unique_chunks[0].chunk_index == 0
+    assert unique_chunks[0].content == "alpha beta gamma delta"
 
 
 def test_chunking_preview_returns_chunks_without_persisting(monkeypatch):

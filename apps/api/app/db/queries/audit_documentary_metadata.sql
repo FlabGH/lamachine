@@ -3,6 +3,22 @@
 SELECT count(*) AS total_chunks
 FROM document_chunks;
 
+SELECT count(*) AS duplicate_document_hash_groups
+FROM (
+    SELECT sha256
+    FROM documents
+    GROUP BY sha256
+    HAVING count(*) > 1
+) duplicate_documents;
+
+SELECT count(*) AS duplicate_chunk_hash_groups
+FROM (
+    SELECT index_version_id, content_sha256
+    FROM document_chunks
+    GROUP BY index_version_id, content_sha256
+    HAVING count(*) > 1
+) duplicate_chunks;
+
 SELECT count(*) AS chunks_without_source_id
 FROM document_chunks
 WHERE metadata->>'source_id' IS NULL
@@ -89,4 +105,25 @@ JOIN documents ON documents.id = document_chunks.document_id
 JOIN sources ON sources.id = documents.source_id
 JOIN index_versions ON index_versions.id = document_chunks.index_version_id
 ORDER BY document_chunks.created_at DESC
+LIMIT 20;
+
+SELECT
+    sha256,
+    count(*) AS document_count,
+    array_agg(id ORDER BY created_at) AS document_ids
+FROM documents
+GROUP BY sha256
+HAVING count(*) > 1
+ORDER BY document_count DESC, sha256
+LIMIT 20;
+
+SELECT
+    index_version_id,
+    content_sha256,
+    count(*) AS chunk_count,
+    array_agg(id ORDER BY created_at) AS chunk_ids
+FROM document_chunks
+GROUP BY index_version_id, content_sha256
+HAVING count(*) > 1
+ORDER BY chunk_count DESC, content_sha256
 LIMIT 20;
