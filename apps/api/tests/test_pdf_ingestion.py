@@ -108,7 +108,21 @@ def test_extract_pdf_with_optional_ocr_skips_ocr_on_success(monkeypatch):
         async def extract_pdf(self, path, *, metadata=None):
             raise AssertionError("OCR should not be called")
 
-    monkeypatch.setattr(ingestion, "PdfReader", _reader_with_pages(["Texte utile."]))
+    monkeypatch.setattr(
+        ingestion,
+        "PdfReader",
+        _reader_with_pages(
+            [
+                (
+                    "Cette page contient un paragraphe complet et lisible. "
+                    "Les phrases sont correctement ponctuees. "
+                    "Le texte est assez dense pour ne pas ressembler a une page "
+                    "fragmentaire issue d'une extraction PDF de mauvaise qualite. "
+                )
+                * 3
+            ]
+        ),
+    )
 
     result = asyncio.run(
         ingestion.extract_pdf_with_optional_ocr(
@@ -120,6 +134,7 @@ def test_extract_pdf_with_optional_ocr_skips_ocr_on_success(monkeypatch):
     assert result.status == "success"
     assert result.ocr_used is False
     assert result.ocr_trigger_reason is None
+    assert result.layout_quality_status == "ok"
 
 
 def test_extract_pdf_with_optional_ocr_keeps_pypdf_result_when_ocr_disabled(monkeypatch):
@@ -182,6 +197,162 @@ def test_extract_pdf_with_optional_ocr_uses_ocr_for_weak_pdf(monkeypatch, tmp_pa
     assert "[SECTION Titre OCR]" in result.raw_text
     assert metadata["ocr_used"] is True
     assert metadata["ocr_trigger_reason"] == "possible_scan_or_empty_text"
+    assert result.extracted_pages[0].extraction_source == "ocr"
+
+
+def test_extract_pdf_marks_weak_layout_pages_as_suspect(monkeypatch):
+    monkeypatch.setattr(
+        ingestion,
+        "PdfReader",
+        _reader_with_pages(
+            [
+                "38\nmilliardaires. L'innovation se retrouve souvent orientee vers",
+                (
+                    "Cette page contient un paragraphe complet. "
+                    "Il est suffisamment long et ponctue pour etre considere correct. "
+                )
+                * 4,
+            ]
+        ),
+    )
+
+    result = ingestion.extract_pdf("/tmp/fake.pdf")
+    metadata = result.metadata()["extraction"]
+
+    assert result.status == "success"
+    assert result.layout_quality_status == "suspect"
+    assert result.layout_suspect_pages == [1]
+    assert "short_text_page" in result.layout_warnings
+    assert metadata["layout_quality_rules_version"] == "weak-layout-v1"
+    assert metadata["layout_suspect_pages"] == [1]
+    assert result.extracted_pages[0].layout_quality.status == "suspect"
+
+
+def test_extract_pdf_with_optional_ocr_replaces_only_suspect_layout_pages(
+    monkeypatch,
+    tmp_path,
+):
+    class FakeOcrClient:
+        provider = "fake"
+        model = "fake-layout-ocr"
+        enabled = True
+
+        async def extract_pdf(self, path, *, metadata=None):
+            assert metadata["trigger_reason"] == "weak_layout_quality"
+            assert metadata["ocr_pages"] == [1]
+            assert metadata["page_map"] == {1: 1}
+            assert path == str(subset_path)
+            return OcrResult(
+                pages=[
+                    OcrPage(
+                        page=1,
+                        text=(
+                            "Mettre l'intelligence artificielle au service du bien commun\n"
+                            "L'intelligence artificielle ouvre des possibilites immenses. "
+                            "Nous proposons une maitrise democratique, des audits reguliers "
+                            "et une mise au service de l'interet general."
+                        ),
+                    )
+                ],
+                provider=self.provider,
+                model=self.model,
+                pages_processed=1,
+            )
+
+    pdf_path = tmp_path / "weak-layout.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7\nbody\n%%EOF")
+    subset_path = tmp_path / "subset.pdf"
+    subset_path.write_bytes(b"%PDF-1.7\nsubset\n%%EOF")
+    monkeypatch.setattr(
+        ingestion,
+        "PdfReader",
+        _reader_with_pages(
+            [
+                "38\nmilliardaires. L'innovation se retrouve souvent orientee vers",
+                (
+                    "Cette page contient un paragraphe complet. "
+                    "Il est suffisamment long et ponctue pour etre considere correct. "
+                )
+                * 4,
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        ingestion,
+        "build_pages_pdf_for_ocr",
+        lambda path, pages: (str(subset_path), {1: 1}),
+    )
+
+    result = asyncio.run(
+        ingestion.extract_pdf_with_optional_ocr(
+            str(pdf_path),
+            ocr_client=FakeOcrClient(),
+        )
+    )
+    metadata = result.metadata()
+
+    assert result.method == "pypdf.extract_text+fake.layout_ocr"
+    assert result.ocr_used is True
+    assert result.ocr_trigger_reason == "weak_layout_quality"
+    assert result.layout_ocr_pages_requested == [1]
+    assert result.layout_ocr_pages_replaced == [1]
+    assert result.layout_ocr_pages_kept_original == []
+    assert result.extracted_pages[0].extraction_source == "ocr"
+    assert result.extracted_pages[1].extraction_source == "pypdf"
+    assert "Mettre l'intelligence artificielle" in result.raw_text
+    assert metadata["extracted_pages"][0]["layout_quality"]["original_char_count"] == 64
+    assert metadata["extracted_pages"][0]["layout_quality"]["ocr_word_count"] > 0
+
+
+def test_extract_pdf_with_optional_ocr_keeps_original_when_layout_ocr_is_noisy(
+    monkeypatch,
+    tmp_path,
+):
+    class FakeOcrClient:
+        provider = "fake"
+        model = "fake-layout-ocr"
+        enabled = True
+
+        async def extract_pdf(self, path, *, metadata=None):
+            return OcrResult(
+                pages=[OcrPage(page=1, text="### @@@ ### @@@")],
+                provider=self.provider,
+                model=self.model,
+                pages_processed=1,
+            )
+
+    pdf_path = tmp_path / "weak-layout.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7\nbody\n%%EOF")
+    subset_path = tmp_path / "subset.pdf"
+    subset_path.write_bytes(b"%PDF-1.7\nsubset\n%%EOF")
+    monkeypatch.setattr(
+        ingestion,
+        "PdfReader",
+        _reader_with_pages(
+            ["38\nmilliardaires. L'innovation se retrouve souvent orientee vers"]
+        ),
+    )
+    monkeypatch.setattr(
+        ingestion,
+        "build_pages_pdf_for_ocr",
+        lambda path, pages: (str(subset_path), {1: 1}),
+    )
+
+    result = asyncio.run(
+        ingestion.extract_pdf_with_optional_ocr(
+            str(pdf_path),
+            ocr_client=FakeOcrClient(),
+        )
+    )
+
+    assert result.ocr_used is False
+    assert result.layout_ocr_pages_requested == [1]
+    assert result.layout_ocr_pages_replaced == []
+    assert result.layout_ocr_pages_kept_original == [1]
+    assert result.extracted_pages[0].extraction_source == "pypdf"
+    assert result.extracted_pages[0].layout_quality.status == (
+        "ocr_attempted_no_improvement"
+    )
 
 
 def test_clean_pdf_for_ocr_repairs_multipart_envelope(tmp_path):

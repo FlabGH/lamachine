@@ -183,6 +183,8 @@ class ExtractedPageRead(BaseModel):
     text: str
     char_count: int
     section_title: str | None = None
+    extraction_source: str = "pypdf"
+    layout_quality: dict = Field(default_factory=dict)
 
 
 class ExtractionReportRead(BaseModel):
@@ -198,6 +200,13 @@ class ExtractionReportRead(BaseModel):
     empty_pages: list[int] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    layout_quality_rules_version: str | None = None
+    layout_quality_status: str | None = None
+    layout_suspect_pages: list[int] = Field(default_factory=list)
+    layout_ocr_pages_requested: list[int] = Field(default_factory=list)
+    layout_ocr_pages_replaced: list[int] = Field(default_factory=list)
+    layout_ocr_pages_kept_original: list[int] = Field(default_factory=list)
+    layout_warnings: list[str] = Field(default_factory=list)
 
 
 class DocumentExtractionRead(BaseModel):
