@@ -345,7 +345,12 @@ async def _index_documents(document_ids: list[UUID], index_version_id: UUID) -> 
         )
 
 
-async def _run_query(query: QuerySpec, index_version_id: UUID, top_k: int) -> dict[str, Any]:
+async def _run_query(
+    query: QuerySpec,
+    index_version_id: UUID,
+    top_k: int,
+    rerank_top_k: int,
+) -> dict[str, Any]:
     from app.api.documentary import SearchRequest, search_documents
     from app.db import get_connection
 
@@ -354,7 +359,7 @@ async def _run_query(query: QuerySpec, index_version_id: UUID, top_k: int) -> di
             query=query.query,
             index_version_id=index_version_id,
             top_k=top_k,
-            rerank_top_k=top_k,
+            rerank_top_k=rerank_top_k,
         )
     )
 
@@ -461,6 +466,7 @@ def _write_report(
     query_reports: list[dict[str, Any]],
     chunk_metrics: dict[str, float],
     top_k: int,
+    rerank_top_k: int,
 ) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     query_count = len(query_reports)
@@ -477,6 +483,8 @@ def _write_report(
         f"Evaluation queries: `{queries_path.relative_to(REPO_ROOT)}`",
         f"Index version id: `{index_version_id}`",
         f"Vector collection: `{vector_collection}`",
+        f"Top k: `{top_k}`",
+        f"Rerank top k: `{rerank_top_k}`",
         "",
         "## Metrics",
         "",
@@ -616,7 +624,14 @@ async def _run(args: argparse.Namespace) -> Path:
     query_reports = []
     for index, query in enumerate(queries, start=1):
         _log(f"Running query {index}/{len(queries)}: {query.query_id}")
-        query_reports.append(await _run_query(query, index_version_id, args.top_k))
+        query_reports.append(
+            await _run_query(
+                query,
+                index_version_id,
+                args.top_k,
+                args.rerank_top_k,
+            )
+        )
 
     _log("Computing chunk quality metrics")
     chunk_metrics = _chunk_quality_metrics(index_version_id)
@@ -630,6 +645,7 @@ async def _run(args: argparse.Namespace) -> Path:
         query_reports=query_reports,
         chunk_metrics=chunk_metrics,
         top_k=args.top_k,
+        rerank_top_k=args.rerank_top_k,
     )
     return report_path
 
@@ -640,7 +656,8 @@ def main() -> None:
     parser.add_argument("--queries", default=None)
     parser.add_argument("--files-dir", default=str(DEFAULT_FILES_DIR.relative_to(REPO_ROOT)))
     parser.add_argument("--report", default=str(DEFAULT_REPORT.relative_to(REPO_ROOT)))
-    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--top-k", type=int, default=30)
+    parser.add_argument("--rerank-top-k", type=int, default=20)
     parser.add_argument("--index-name", default=None)
     parser.add_argument("--vector-collection", default=None)
     parser.add_argument("--reuse-index-version-id", default=None)

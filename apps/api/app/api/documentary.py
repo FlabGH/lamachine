@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from enum import Enum
 from uuid import UUID
@@ -52,6 +53,10 @@ router = APIRouter(prefix="/documentary", tags=["documentary"])
 
 DENSE_WEIGHT = 0.6
 LEXICAL_WEIGHT = 0.4
+DEFAULT_SEARCH_TOP_K_ENV = "DOCUMENTARY_SEARCH_TOP_K"
+DEFAULT_RERANK_TOP_K_ENV = "DOCUMENTARY_RERANK_TOP_K"
+POC_DEFAULT_SEARCH_TOP_K = 30
+POC_DEFAULT_RERANK_TOP_K = 20
 LEXICAL_SEARCH_CONFIG = "french"
 LEXICAL_MAX_QUERY_TERMS = 12
 LEXICAL_MIN_TERM_LENGTH = 3
@@ -128,6 +133,25 @@ def _build_lexical_websearch_query(query: str) -> str | None:
 def _json_trace_hash(payload: dict | list) -> str:
     serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _default_search_top_k() -> int:
+    return _env_int(DEFAULT_SEARCH_TOP_K_ENV, POC_DEFAULT_SEARCH_TOP_K)
+
+
+def _default_rerank_top_k() -> int:
+    return _env_int(DEFAULT_RERANK_TOP_K_ENV, POC_DEFAULT_RERANK_TOP_K)
 
 
 def _adapter_response_metadata(client, raw: dict | None = None) -> dict:
@@ -258,8 +282,8 @@ class RunRead(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     index_version_id: UUID
-    top_k: int = 10
-    rerank_top_k: int = 5
+    top_k: int = Field(default_factory=_default_search_top_k)
+    rerank_top_k: int = Field(default_factory=_default_rerank_top_k)
 
 
 class SearchHit(BaseModel):
@@ -286,8 +310,8 @@ class GenerateNoteRequest(BaseModel):
             OutputPersona.presse,
         ]
     )
-    top_k: int = 10
-    rerank_top_k: int = 5
+    top_k: int = Field(default_factory=_default_search_top_k)
+    rerank_top_k: int = Field(default_factory=_default_rerank_top_k)
     prompt_version: str = "note_riposte_v1"
 
 
@@ -948,6 +972,8 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                         json.dumps(
                             {
                                 "hits": 0,
+                                "top_k": payload.top_k,
+                                "rerank_top_k": payload.rerank_top_k,
                                 "ai_backend_preset": ai_backend_preset,
                                 "dense_hits": len(dense_hits),
                                 "lexical_hits": len(lexical_hits),
@@ -1111,6 +1137,8 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                     json.dumps(
                         {
                             "hits": len(final_hits),
+                            "top_k": payload.top_k,
+                            "rerank_top_k": payload.rerank_top_k,
                             "ai_backend_preset": ai_backend_preset,
                             "dense_hits": len(dense_hits),
                             "lexical_hits": len(lexical_hits),
