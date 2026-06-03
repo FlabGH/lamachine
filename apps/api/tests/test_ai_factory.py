@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx
 import pytest
 
 from app.services.ai.clients import LLMMessage, RerankCandidate, RerankResult
@@ -46,6 +47,37 @@ class DummyJinaAsyncClient:
             "results": [
                 {"index": 1, "relevance_score": 0.9},
                 {"index": 0, "relevance_score": 0.3},
+            ]
+        })
+
+
+class DummyRateLimitedResponse:
+    def raise_for_status(self):
+        request = httpx.Request("POST", "https://api.jina.ai/v1/rerank")
+        response = httpx.Response(429, request=request)
+        raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+
+
+class DummyRetryJinaAsyncClient:
+    calls = 0
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def post(self, api_url, json, headers):
+        self.__class__.calls += 1
+        if self.__class__.calls == 1:
+            return DummyRateLimitedResponse()
+        return DummyResponse({
+            "results": [
+                {"index": 0, "relevance_score": 0.8},
+                {"index": 1, "relevance_score": 0.2},
             ]
         })
 
@@ -242,3 +274,26 @@ class TestAIClientFactory:
         result = asyncio.run(client.rerank("test query", candidates, top_k=1))
 
         assert result == [RerankResult(id="b", score=0.9, rank=1)]
+
+    def test_jina_reranker_retries_on_rate_limit(self, monkeypatch):
+        async def no_sleep(delay):
+            return None
+
+        DummyRetryJinaAsyncClient.calls = 0
+        monkeypatch.setenv("JINA_API_KEY", "test-key")
+        monkeypatch.setenv("JINA_RERANKER_MODEL", "jina-reranker-v2-base-multilingual")
+        monkeypatch.setenv("JINA_RERANKER_MAX_RETRIES", "1")
+        monkeypatch.setenv("JINA_RERANKER_RETRY_BACKOFF_SECONDS", "0")
+        monkeypatch.setattr("httpx.AsyncClient", DummyRetryJinaAsyncClient)
+        monkeypatch.setattr("asyncio.sleep", no_sleep)
+
+        client = JinaRerankerClient()
+        candidates = [
+            RerankCandidate(id="a", text="first"),
+            RerankCandidate(id="b", text="second"),
+        ]
+
+        result = asyncio.run(client.rerank("test query", candidates, top_k=1))
+
+        assert DummyRetryJinaAsyncClient.calls == 2
+        assert result == [RerankResult(id="a", score=0.8, rank=1)]
