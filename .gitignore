@@ -35,3 +35,13 @@ qdrant_data/
 
 corpus/poc_ia/files/*
 !corpus/poc_ia/files/.gitkeep
+# Copilot CLI conventions (added from CLI_Template)
+OUTPUT/
+.copilot-memory.json
+Thumbs.db
+.idea/
+*.swp
+*~
+*.local
+venv/
+npm-debug.log*
