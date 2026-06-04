@@ -1,6 +1,7 @@
 documents:
-  - file: programme-rn-ia.pdf
-    title: Programme RN IA
+
+  - file: Programme-RN_2024.pdf
+    title: Programme du Rassemblement national – positions relatives à l’intelligence artificielle (2024)
     source_code: rn
     role_documentaire: opposition
     famille_politique: extreme_droite
@@ -10,29 +11,214 @@ documents:
     usage_probatoire: position_officielle
     statut_metadonnees: valide_humain
     mode_qualification: manuel
+    qualification_confidence: 0.95
+    qualification_rationale: >
+      Extraits du programme officiel du Rassemblement national.
+      Source primaire exprimant une doctrine partisane explicite sur souveraineté,
+      numérique et IA. Référence utile pour identifier positions adverses officielles.
+    validated_by: redaction
+    validated_at: null
+    theme_tags:
+      - ia
+      - souverainete_numerique
+      - innovation
+      - regulation
+      - emploi
+      - etat
+
+  - file: Cour_des_comptes_20251119-synthese-Strategie-nationale-IA.pdf
+    title: Cour des comptes – Synthèse du rapport sur la stratégie nationale pour l’intelligence artificielle (2025)
+    source_code: cour_des_comptes
+    role_documentaire: cadrage_institutionnel
+    famille_politique: institution_republicaine
+    positionnement: neutre
+    niveau_confiance: eleve
+    type_document: rapport_public
+    usage_probatoire: audit
+    statut_metadonnees: valide_humain
+    mode_qualification: manuel
+    qualification_confidence: 0.95
+    qualification_rationale: >
+      Rapport de juridiction financière apportant un état des lieux factuel sur
+      pilotage, financement et gouvernance de la stratégie IA. Source institutionnelle
+      robuste utile comme base probatoire.
+    validated_by: redaction
+    validated_at: null
+    theme_tags:
+      - ia
+      - strategie_nationale
+      - gouvernance
+      - innovation
+      - recherche
+      - investissement_public
+      - evaluation_publique
+
+  - file: Jean_Jaures_ITW_2026.pdf
+    title: Fondation Jean-Jaurès – « La vraie course à l’intelligence artificielle est sociale, pas technologique » (2026)
+    source_code: fondation_jean_jaures
+    role_documentaire: doctrine_alliee
+    famille_politique: gauche_progressiste
+    positionnement: allie_critique
+    niveau_confiance: eleve
+    type_document: entretien
+    usage_probatoire: analyse
+    statut_metadonnees: valide_humain
+    mode_qualification: manuel
     qualification_confidence: 0.9
-    qualification_rationale: Source officielle représentant une position adverse.
+    qualification_rationale: >
+      Analyse issue d’un think tank proche de la gauche réformiste.
+      Cadrage utile sur effets sociaux de l’IA, redistribution, travail et cohésion.
     validated_by: redaction
     validated_at: null
     theme_tags:
       - ia
       - travail
+      - emploi
+      - redistribution
+      - protection_sociale
+      - cohesion_sociale
+      - innovation
+      - europe
+      - souverainete_numerique
 
-  - file: rapport-public-ia-travail.pdf
-    title: Rapport public IA et travail
-    source_code: france_travail
-    role_documentaire: source_factuelle
-    famille_politique: institutionnel
-    positionnement: contextuel
-    niveau_confiance: moyen
-    type_document: rapport_institutionnel
-    usage_probatoire: contexte
-    statut_metadonnees: brouillon
+  - file: LeMonde _ Comment l’extrême droite a utilisé l’intelligence artificielle pour faire la campagne des législatives.pdf
+    title: Le Monde – Comment l’extrême droite a utilisé l’intelligence artificielle pour faire la campagne des législatives (2024)
+    source_code: lemonde
+    role_documentaire: presse_analyse
+    famille_politique: media_reference
+    positionnement: observation
+    niveau_confiance: eleve
+    type_document: article_presse
+    usage_probatoire: analyse
+    statut_metadonnees: valide_humain
     mode_qualification: manuel
-    qualification_confidence: 0.7
-    qualification_rationale: Document de contexte à vérifier avant validation humaine.
-    validated_by: pending
+    qualification_confidence: 0.9
+    qualification_rationale: >
+      Article de presse documentant l’usage politique de l’IA générative
+      par des acteurs d’extrême droite pendant les législatives.
+      Intérêt sur désinformation, campagnes numériques et régulation démocratique.
+    validated_by: redaction
     validated_at: null
     theme_tags:
       - ia
+      - politique
+      - campagne_electorale
+      - democratie
+      - desinformation
+      - reseaux_sociaux
+      - extreme_droite
+      - contenus_generatifs
+
+  - file: Magnifica Humanitas chap3.pdf
+    title: "Magnifica Humanitas – Chapitre 3 « Technique et maîtrise : la grandeur de la personne humaine face aux promesses de l’IA »"
+    source_code: magnifica_humanitas
+    role_documentaire: doctrine_ethique
+    famille_politique: doctrine_sociale_chretienne
+    positionnement: inspiration
+    niveau_confiance: eleve
+    type_document: essai_doctrinal
+    usage_probatoire: analyse
+    statut_metadonnees: valide_humain
+    mode_qualification: manuel
+    qualification_confidence: 0.9
+    qualification_rationale: >
+      Texte de doctrine sociale proposant un cadre anthropologique,
+      politique et moral sur IA, technique et bien commun.
+      Utile pour raisonnement normatif et critique du paradigme technocratique.
+    validated_by: redaction
+    validated_at: null
+    theme_tags:
+      - ia
+      - ethique
+      - anthropologie
+      - bien_commun
+      - technique
+      - gouvernance
+      - justice_sociale
+      - transhumanisme
+
+  - file: Programme LFI 2025 IA.pdf
+    title: La France insoumise – L’Avenir en commun, extraits IA et numérique (2025)
+    source_code: lfi
+    role_documentaire: doctrine_alliee
+    famille_politique: gauche_radicale
+    positionnement: allie
+    niveau_confiance: eleve
+    type_document: programme_politique
+    usage_probatoire: position_officielle
+    statut_metadonnees: valide_humain
+    mode_qualification: manuel
+    qualification_confidence: 0.95
+    qualification_rationale: >
+      Programme officiel comportant propositions explicites sur souveraineté
+      numérique, contrôle public des infrastructures et maîtrise de l’IA.
+      Source primaire de doctrine politique alliée.
+    validated_by: redaction
+    validated_at: null
+    theme_tags:
+      - ia
+      - souverainete_numerique
+      - logiciels_libres
+      - services_publics
+      - regulation
+      - innovation
+      - infrastructures
+      - bien_commun
+
+  - file: Projet_PS_2026_IA.pdf
+    title: Parti socialiste – Projet 2026, chapitre IA et numérique
+    source_code: ps
+    role_documentaire: doctrine_alliee
+    famille_politique: gauche_social_democrate
+    positionnement: allie
+    niveau_confiance: eleve
+    type_document: programme_politique
+    usage_probatoire: position_officielle
+    statut_metadonnees: valide_humain
+    mode_qualification: manuel
+    qualification_confidence: 0.95
+    qualification_rationale: >
+      Programme officiel du PS avec propositions détaillées sur plateformes,
+      IA au service du bien commun, service public et innovation démocratique.
+      Source primaire structurante.
+    validated_by: redaction
+    validated_at: null
+    theme_tags:
+      - ia
+      - service_public
+      - regulation
+      - plateformes
+      - innovation
+      - democratie
+      - souverainete_numerique
       - emploi
+      - recherche
+
+  - file: Sens_service_public_2025_Rapport_IA.pdf
+    title: Sens du service public – rapport IA (2025)
+    source_code: sens_service_public
+    role_documentaire: doctrine_sectorielle
+    famille_politique: reformisme_public
+    positionnement: appui
+    niveau_confiance: eleve
+    type_document: rapport_expertise
+    usage_probatoire: recommandations
+    statut_metadonnees: valide_humain
+    mode_qualification: manuel
+    qualification_confidence: 0.9
+    qualification_rationale: >
+      Rapport d’expertise centré sur l’usage de l’IA dans l’action publique.
+      Intérêt pour recommandations, transformation administrative et doctrine
+      du service public.
+    validated_by: redaction
+    validated_at: null
+    theme_tags:
+      - ia
+      - service_public
+      - administration
+      - transformation_numerique
+      - contrôle
+      - etat
+      - usagers
+      - formation
+      - qualite

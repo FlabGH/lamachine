@@ -1,10 +1,33 @@
 from __future__ import annotations
 
+import asyncio
 import os
 
 import httpx
 
 from app.services.ai.clients import RerankCandidate, RerankResult
+
+
+def _env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        value = float(raw_value)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
 
 
 class LexicalOverlapReranker:
@@ -57,6 +80,8 @@ class JinaRerankerClient:
         self.api_url = os.getenv("JINA_RERANKER_API_URL", "https://api.jina.ai/v1/rerank").strip()
         if not self.api_url:
             raise ValueError("JINA_RERANKER_API_URL must be configured for Jina reranking")
+        self.max_retries = _env_int("JINA_RERANKER_MAX_RETRIES", 3)
+        self.retry_backoff_seconds = _env_float("JINA_RERANKER_RETRY_BACKOFF_SECONDS", 2.0)
 
     async def rerank(
         self,
@@ -86,10 +111,21 @@ class JinaRerankerClient:
         if top_k is not None:
             payload["top_n"] = top_k
 
+        body: dict | None = None
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(self.api_url, json=payload, headers=headers)
-            response.raise_for_status()
-            body = response.json()
+            for attempt in range(self.max_retries + 1):
+                response = await client.post(self.api_url, json=payload, headers=headers)
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code != 429 or attempt >= self.max_retries:
+                        raise
+                    await asyncio.sleep(self.retry_backoff_seconds * (2 ** attempt))
+                    continue
+                body = response.json()
+                break
+        if body is None:
+            raise ValueError("Invalid empty response from Jina reranker provider")
 
         data = body.get("results", body.get("data"))
         if not isinstance(data, list):

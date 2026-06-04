@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import re
 from enum import Enum
 from uuid import UUID
 
@@ -51,11 +53,105 @@ router = APIRouter(prefix="/documentary", tags=["documentary"])
 
 DENSE_WEIGHT = 0.6
 LEXICAL_WEIGHT = 0.4
+DEFAULT_SEARCH_TOP_K_ENV = "DOCUMENTARY_SEARCH_TOP_K"
+DEFAULT_RERANK_TOP_K_ENV = "DOCUMENTARY_RERANK_TOP_K"
+POC_DEFAULT_SEARCH_TOP_K = 30
+POC_DEFAULT_RERANK_TOP_K = 20
+LEXICAL_SEARCH_CONFIG = "french"
+LEXICAL_MAX_QUERY_TERMS = 12
+LEXICAL_MIN_TERM_LENGTH = 3
+LEXICAL_STOPWORDS = {
+    "avec",
+    "aux",
+    "dans",
+    "des",
+    "donc",
+    "elle",
+    "elles",
+    "est",
+    "etre",
+    "être",
+    "fait",
+    "faut",
+    "ils",
+    "les",
+    "leur",
+    "leurs",
+    "mais",
+    "par",
+    "pas",
+    "peut",
+    "pour",
+    "que",
+    "quel",
+    "quelle",
+    "quels",
+    "quelles",
+    "quoi",
+    "sont",
+    "sur",
+    "une",
+    "vers",
+}
+LEXICAL_SEARCH_TEXT_SQL = """
+concat_ws(
+    ' ',
+    content,
+    replace(COALESCE(metadata->>'source_code', ''), '_', ' '),
+    replace(COALESCE(metadata->>'document_title', ''), '_', ' '),
+    replace(COALESCE(metadata->>'role_documentaire', ''), '_', ' '),
+    replace(COALESCE(metadata->>'theme_tags', ''), '_', ' ')
+)
+"""
+
+
+def _significant_lexical_terms(query: str) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw_term in re.findall(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ_]+", query.lower()):
+        term = raw_term.strip("_'-")
+        if len(term) < LEXICAL_MIN_TERM_LENGTH:
+            continue
+        if term in LEXICAL_STOPWORDS:
+            continue
+        if term in seen:
+            continue
+        seen.add(term)
+        terms.append(term)
+        if len(terms) >= LEXICAL_MAX_QUERY_TERMS:
+            break
+    return terms
+
+
+def _build_lexical_websearch_query(query: str) -> str | None:
+    terms = _significant_lexical_terms(query)
+    if not terms:
+        return None
+    return " OR ".join(terms)
 
 
 def _json_trace_hash(payload: dict | list) -> str:
     serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _default_search_top_k() -> int:
+    return _env_int(DEFAULT_SEARCH_TOP_K_ENV, POC_DEFAULT_SEARCH_TOP_K)
+
+
+def _default_rerank_top_k() -> int:
+    return _env_int(DEFAULT_RERANK_TOP_K_ENV, POC_DEFAULT_RERANK_TOP_K)
 
 
 def _adapter_response_metadata(client, raw: dict | None = None) -> dict:
@@ -111,6 +207,8 @@ class ExtractedPageRead(BaseModel):
     text: str
     char_count: int
     section_title: str | None = None
+    extraction_source: str = "pypdf"
+    layout_quality: dict = Field(default_factory=dict)
 
 
 class ExtractionReportRead(BaseModel):
@@ -126,6 +224,13 @@ class ExtractionReportRead(BaseModel):
     empty_pages: list[int] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    layout_quality_rules_version: str | None = None
+    layout_quality_status: str | None = None
+    layout_suspect_pages: list[int] = Field(default_factory=list)
+    layout_ocr_pages_requested: list[int] = Field(default_factory=list)
+    layout_ocr_pages_replaced: list[int] = Field(default_factory=list)
+    layout_ocr_pages_kept_original: list[int] = Field(default_factory=list)
+    layout_warnings: list[str] = Field(default_factory=list)
 
 
 class DocumentExtractionRead(BaseModel):
@@ -177,8 +282,8 @@ class RunRead(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     index_version_id: UUID
-    top_k: int = 10
-    rerank_top_k: int = 5
+    top_k: int = Field(default_factory=_default_search_top_k)
+    rerank_top_k: int = Field(default_factory=_default_rerank_top_k)
 
 
 class SearchHit(BaseModel):
@@ -205,8 +310,8 @@ class GenerateNoteRequest(BaseModel):
             OutputPersona.presse,
         ]
     )
-    top_k: int = 10
-    rerank_top_k: int = 5
+    top_k: int = Field(default_factory=_default_search_top_k)
+    rerank_top_k: int = Field(default_factory=_default_rerank_top_k)
     prompt_version: str = "note_riposte_v1"
 
 
@@ -799,32 +904,57 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                 if hit.payload and "chunk_id" in hit.payload
             }
 
-            cur.execute(
-                """
-                SELECT
-                    id,
-                    document_id,
-                    content,
-                    metadata,
-                    ts_rank_cd(
-                        to_tsvector('simple', content),
-                        plainto_tsquery('simple', %s)
-                    ) AS lexical_score
-                FROM document_chunks
-                WHERE index_version_id = %s
-                  AND to_tsvector('simple', content)
-                      @@ plainto_tsquery('simple', %s)
-                ORDER BY lexical_score DESC
-                LIMIT %s
-                """,
-                (
-                    payload.query,
-                    payload.index_version_id,
-                    payload.query,
-                    payload.top_k,
-                ),
-            )
-            lexical_hits = cur.fetchall()
+            lexical_query = _build_lexical_websearch_query(payload.query)
+            if lexical_query:
+                cur.execute(
+                    f"""
+                    WITH lexical_query AS (
+                        SELECT websearch_to_tsquery(
+                            '{LEXICAL_SEARCH_CONFIG}',
+                            %s
+                        ) AS tsq
+                    ),
+                    lexical_chunks AS (
+                        SELECT
+                            id,
+                            document_id,
+                            content,
+                            metadata,
+                            {LEXICAL_SEARCH_TEXT_SQL} AS lexical_text
+                        FROM document_chunks
+                        WHERE index_version_id = %s
+                    )
+                    SELECT
+                        lexical_chunks.id,
+                        lexical_chunks.document_id,
+                        lexical_chunks.content,
+                        lexical_chunks.metadata,
+                        ts_rank_cd(
+                            to_tsvector(
+                                '{LEXICAL_SEARCH_CONFIG}',
+                                lexical_chunks.lexical_text
+                            ),
+                            lexical_query.tsq
+                        ) AS lexical_score
+                    FROM lexical_chunks
+                    CROSS JOIN lexical_query
+                    WHERE lexical_query.tsq <> ''::tsquery
+                      AND to_tsvector(
+                            '{LEXICAL_SEARCH_CONFIG}',
+                            lexical_chunks.lexical_text
+                          ) @@ lexical_query.tsq
+                    ORDER BY lexical_score DESC
+                    LIMIT %s
+                    """,
+                    (
+                        lexical_query,
+                        payload.index_version_id,
+                        payload.top_k,
+                    ),
+                )
+                lexical_hits = cur.fetchall()
+            else:
+                lexical_hits = []
 
             candidate_ids = set(dense_scores_by_chunk_id.keys())
             candidate_ids.update(str(row["id"]) for row in lexical_hits)
@@ -842,9 +972,12 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                         json.dumps(
                             {
                                 "hits": 0,
+                                "top_k": payload.top_k,
+                                "rerank_top_k": payload.rerank_top_k,
                                 "ai_backend_preset": ai_backend_preset,
                                 "dense_hits": len(dense_hits),
                                 "lexical_hits": len(lexical_hits),
+                                "lexical_query": lexical_query,
                                 "embedding_model_call_id": str(query_embedding_model_call_id),
                                 "vector_collection": index_version["vector_collection"],
                                 "embedding_provider": embedding_client.provider,
@@ -1004,9 +1137,12 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                     json.dumps(
                         {
                             "hits": len(final_hits),
+                            "top_k": payload.top_k,
+                            "rerank_top_k": payload.rerank_top_k,
                             "ai_backend_preset": ai_backend_preset,
                             "dense_hits": len(dense_hits),
                             "lexical_hits": len(lexical_hits),
+                            "lexical_query": lexical_query,
                             "candidates": len(candidates),
                             "embedding_model_call_id": str(query_embedding_model_call_id),
                             "rerank_model_call_id": str(rerank_model_call_id),

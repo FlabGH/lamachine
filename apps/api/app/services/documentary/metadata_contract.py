@@ -4,33 +4,46 @@ from typing import Any
 
 
 ROLE_DOCUMENTAIRE_VALUES = {
+    "cadrage_institutionnel",
     "doctrine_centrale",
     "doctrine_alliee",
+    "doctrine_ethique",
+    "doctrine_sectorielle",
     "source_factuelle",
     "opposition",
     "contexte_mediatique",
     "cadre_juridique",
     "arbitrage_interne",
+    "presse_analyse",
 }
 
 FAMILLE_POLITIQUE_VALUES = {
+    "doctrine_sociale_chretienne",
     "gauche_progressiste",
     "gauche_radicale",
+    "gauche_social_democrate",
     "extreme_droite",
     "droite",
     "centre",
     "institutionnel",
+    "institution_republicaine",
     "academique",
+    "media_reference",
     "presse",
     "autre",
+    "reformisme_public",
 }
 
 POSITION_PROJET_VALUES = {
+    "allie",
     "reference",
     "aligne",
     "allie_critique",
+    "appui",
     "adversaire",
+    "inspiration",
     "neutre",
+    "observation",
     "contextuel",
 }
 
@@ -42,8 +55,11 @@ NIVEAU_CONFIANCE_VALUES = {
 }
 
 TYPE_DOCUMENT_VALUES = {
+    "essai_doctrinal",
     "programme_politique",
     "note_programmatique",
+    "rapport_expertise",
+    "rapport_public",
     "rapport_think_tank",
     "rapport_institutionnel",
     "texte_juridique",
@@ -71,10 +87,12 @@ MODE_QUALIFICATION_VALUES = {
 }
 
 USAGE_PROBATOIRE_VALUES = {
+    "audit",
     "preuve_directe",
     "position_officielle",
     "analyse",
     "contexte",
+    "recommandations",
     "a_verifier",
 }
 

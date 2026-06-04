@@ -77,8 +77,8 @@ def test_frontend_config_exposes_generation_defaults():
 
     assert config["default_generation"] == {
         "personas": ["elu", "militant", "presse"],
-        "top_k": 10,
-        "rerank_top_k": 5,
+        "top_k": 30,
+        "rerank_top_k": 20,
         "prompt_version": "note_riposte_v1",
     }
 

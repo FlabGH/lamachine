@@ -23,6 +23,8 @@ build/
 
 *.log
 
+artifacts/
+
 data/
 storage/
 
