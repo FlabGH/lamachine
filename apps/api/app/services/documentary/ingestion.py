@@ -395,9 +395,15 @@ def extract_pdf(path: str) -> PdfExtraction:
 
 
 def should_attempt_ocr(extraction: PdfExtraction) -> bool:
+    if extraction.status == "failed":
+        return "possible_scan_or_empty_text" in extraction.warnings
+    if extraction.status != "partial" or "possible_scan_or_empty_text" not in extraction.warnings:
+        return False
+    if extraction.page_count == 0:
+        return True
     return (
-        extraction.status in {"failed", "partial"}
-        and "possible_scan_or_empty_text" in extraction.warnings
+        extraction.pages_with_text == 0
+        or extraction.pages_with_text / extraction.page_count < 0.5
     )
 
 
@@ -676,7 +682,7 @@ async def extract_pdf_with_optional_ocr(
         "possible_scan_or_empty_text"
         if should_attempt_ocr(extraction)
         else "weak_layout_quality"
-        if extraction.layout_suspect_pages
+        if extraction.status == "success" and extraction.layout_suspect_pages
         else None
     )
     if not trigger_reason:

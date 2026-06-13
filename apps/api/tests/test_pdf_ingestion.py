@@ -384,6 +384,48 @@ def test_extract_pdf_with_optional_ocr_replaces_only_suspect_layout_pages(
     assert metadata["extracted_pages"][0]["layout_quality"]["ocr_word_count"] > 0
 
 
+def test_extract_pdf_with_optional_ocr_skips_ocr_for_partial_readable_pdf(
+    monkeypatch,
+    tmp_path,
+):
+    class FakeOcrClient:
+        provider = "fake"
+        model = "fake-layout-ocr"
+        enabled = True
+
+        async def extract_pdf(self, path, *, metadata=None):
+            raise AssertionError("Readable partial PDFs should not trigger OCR")
+
+    pdf_path = tmp_path / "partial-readable.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7\nbody\n%%EOF")
+    monkeypatch.setattr(
+        ingestion,
+        "PdfReader",
+        _reader_with_pages(
+            [
+                "38\nmilliardaires. L'innovation se retrouve souvent orientee vers",
+                (
+                    "Cette page contient un paragraphe complet. "
+                    "Il est suffisamment long et ponctue pour etre conserve. "
+                )
+                * 4,
+                "",
+            ]
+        ),
+    )
+    result = asyncio.run(
+        ingestion.extract_pdf_with_optional_ocr(
+            str(pdf_path),
+            ocr_client=FakeOcrClient(),
+        )
+    )
+
+    assert result.status == "partial"
+    assert result.ocr_trigger_reason is None
+    assert result.ocr_used is False
+    assert result.layout_suspect_pages == [1]
+
+
 def test_extract_pdf_with_optional_ocr_keeps_original_when_layout_ocr_is_noisy(
     monkeypatch,
     tmp_path,

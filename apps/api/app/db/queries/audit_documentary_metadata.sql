@@ -75,6 +75,84 @@ FROM document_chunks
 WHERE metadata->>'statut_metadonnees' IS NULL
    OR metadata->>'statut_metadonnees' = '';
 
+SELECT count(*) AS documents_without_data_tags
+FROM documents
+WHERE metadata->'data_tags' IS NULL
+   OR jsonb_typeof(metadata->'data_tags') <> 'array'
+   OR jsonb_array_length(metadata->'data_tags') = 0;
+
+SELECT count(*) AS documents_without_service_family
+FROM documents
+WHERE metadata->>'service_family' IS NULL
+   OR metadata->>'service_family' = '';
+
+SELECT count(*) AS documents_without_visibility_scope
+FROM documents
+WHERE metadata->>'visibility_scope' IS NULL
+   OR metadata->>'visibility_scope' = '';
+
+SELECT count(*) AS documents_without_access_level
+FROM documents
+WHERE metadata->>'access_level' IS NULL
+   OR metadata->>'access_level' = '';
+
+SELECT count(*) AS documents_without_language
+FROM documents
+WHERE metadata->>'language' IS NULL
+   OR metadata->>'language' = '';
+
+SELECT count(*) AS documents_without_collected_at
+FROM documents
+WHERE metadata->>'collected_at' IS NULL
+   OR metadata->>'collected_at' = '';
+
+SELECT count(*) AS chunks_without_data_tags
+FROM document_chunks
+WHERE metadata->'data_tags' IS NULL
+   OR jsonb_typeof(metadata->'data_tags') <> 'array'
+   OR jsonb_array_length(metadata->'data_tags') = 0;
+
+SELECT count(*) AS chunks_without_service_family
+FROM document_chunks
+WHERE metadata->>'service_family' IS NULL
+   OR metadata->>'service_family' = '';
+
+SELECT count(*) AS chunks_without_visibility_scope
+FROM document_chunks
+WHERE metadata->>'visibility_scope' IS NULL
+   OR metadata->>'visibility_scope' = '';
+
+SELECT count(*) AS chunks_without_access_level
+FROM document_chunks
+WHERE metadata->>'access_level' IS NULL
+   OR metadata->>'access_level' = '';
+
+SELECT count(*) AS chunks_without_language
+FROM document_chunks
+WHERE metadata->>'language' IS NULL
+   OR metadata->>'language' = '';
+
+SELECT count(*) AS chunks_without_collected_at
+FROM document_chunks
+WHERE metadata->>'collected_at' IS NULL
+   OR metadata->>'collected_at' = '';
+
+SELECT count(*) AS organization_scoped_documents_without_organization_id
+FROM documents
+WHERE metadata->>'visibility_scope' = 'organisation'
+  AND (
+      metadata->>'organization_id' IS NULL
+      OR metadata->>'organization_id' = ''
+  );
+
+SELECT count(*) AS organization_scoped_chunks_without_organization_id
+FROM document_chunks
+WHERE metadata->>'visibility_scope' = 'organisation'
+  AND (
+      metadata->>'organization_id' IS NULL
+      OR metadata->>'organization_id' = ''
+  );
+
 SELECT count(*) AS invalid_index_version_chunking_config
 FROM index_versions
 WHERE chunking_version IS NULL

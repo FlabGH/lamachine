@@ -80,3 +80,17 @@ def test_documentary_metadata_audit_queries_include_enriched_contract_keys():
     assert "content_hash" in sql
     assert "duplicate_document_hash_groups" in sql
     assert "duplicate_chunk_hash_groups" in sql
+    assert "documents_without_data_tags" in sql
+    assert "documents_without_service_family" in sql
+    assert "documents_without_visibility_scope" in sql
+    assert "documents_without_access_level" in sql
+    assert "documents_without_language" in sql
+    assert "documents_without_collected_at" in sql
+    assert "chunks_without_data_tags" in sql
+    assert "chunks_without_service_family" in sql
+    assert "chunks_without_visibility_scope" in sql
+    assert "chunks_without_access_level" in sql
+    assert "chunks_without_language" in sql
+    assert "chunks_without_collected_at" in sql
+    assert "organization_scoped_documents_without_organization_id" in sql
+    assert "organization_scoped_chunks_without_organization_id" in sql
