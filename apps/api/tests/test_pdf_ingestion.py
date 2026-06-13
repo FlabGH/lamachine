@@ -1,4 +1,5 @@
 import asyncio
+import json
 from uuid import UUID
 
 import pytest
@@ -32,6 +33,85 @@ def _reader_with_pages(pages):
             self.pages = [FakePdfPage(page) for page in pages]
 
     return Reader
+
+
+class CapturingCursor:
+    def __init__(self):
+        self.executions = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, query, params):
+        self.executions.append((query, params))
+
+    def fetchone(self):
+        query = self.executions[-1][0]
+        if "INSERT INTO sources" in query:
+            return {"id": UUID("00000000-0000-0000-0000-000000000001")}
+        if "INSERT INTO documents" in query:
+            return {"id": UUID("00000000-0000-0000-0000-000000000002")}
+        if "INSERT INTO runs" in query:
+            return {"id": UUID("00000000-0000-0000-0000-000000000003")}
+        return {}
+
+
+class CapturingConnection:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def cursor(self):
+        return self._cursor
+
+
+class FakePdfUploadFile:
+    filename = "document.pdf"
+    content_type = "application/pdf"
+
+    async def read(self):
+        return b"%PDF document"
+
+
+class FakePdfExtraction:
+    raw_text = "Texte extrait"
+    status = "success"
+
+    def metadata(self):
+        return {
+            "extraction": {
+                "method": "pypdf.extract_text",
+                "status": "success",
+                "page_count": 1,
+                "pages_with_text": 1,
+                "empty_pages": [],
+                "warnings": [],
+                "errors": [],
+            },
+            "extracted_pages": [
+                {
+                    "page": 1,
+                    "text": "Texte extrait",
+                    "char_count": 13,
+                    "section_title": None,
+                }
+            ],
+        }
+
+
+def _document_insert_metadata(cursor):
+    for query, params in cursor.executions:
+        if "INSERT INTO documents" in query:
+            return json.loads(params[-1])
+    raise AssertionError("No document insert captured")
 
 
 def test_extract_pdf_returns_structured_success(monkeypatch):
@@ -457,6 +537,140 @@ def test_get_document_extraction_returns_stored_report_without_reprocessing(monk
     assert response.extraction.status == "success"
     assert response.pages[0].page == 1
     assert response.pages[0].text == "Texte extrait"
+
+
+def test_ingest_text_accepts_without_enriched_metadata(monkeypatch):
+    cursor = CapturingCursor()
+    monkeypatch.setattr(
+        documentary,
+        "get_connection",
+        lambda: CapturingConnection(cursor),
+    )
+
+    response = asyncio.run(
+        documentary.ingest_text(
+            title="Note texte",
+            text="Contenu texte",
+            source_code=" SOURCE ",
+        )
+    )
+    metadata = _document_insert_metadata(cursor)
+
+    assert response.document_id == UUID("00000000-0000-0000-0000-000000000002")
+    assert metadata["title"] == "Note texte"
+    assert metadata["source_code"] == "source"
+    assert metadata["data_tags"] == ["corpus"]
+    assert metadata["service_family"] == "transverse"
+    assert metadata["visibility_scope"] == "public"
+
+
+def test_ingest_text_stores_enriched_metadata(monkeypatch):
+    cursor = CapturingCursor()
+    monkeypatch.setattr(
+        documentary,
+        "get_connection",
+        lambda: CapturingConnection(cursor),
+    )
+
+    asyncio.run(
+        documentary.ingest_text(
+            title="Note debat",
+            text="Contenu texte",
+            source_code="interne",
+            metadata_json=json.dumps(
+                {
+                    "data_tags": ["interne", "parlement"],
+                    "service_family": "debat",
+                    "service_ids": ["I.1"],
+                    "visibility_scope": "organisation",
+                    "organization_id": "Equipe-Test",
+                    "access_level": "restricted",
+                    "language": "fr",
+                    "is_primary_source": True,
+                    "citation_policy": "interne_only",
+                    "rights_status": "internal",
+                }
+            ),
+        )
+    )
+    metadata = _document_insert_metadata(cursor)
+
+    assert metadata["data_tags"] == ["interne", "parlement"]
+    assert metadata["service_family"] == "debat"
+    assert metadata["service_ids"] == ["I.1"]
+    assert metadata["visibility_scope"] == "organisation"
+    assert metadata["organization_id"] == "equipe-test"
+    assert metadata["access_level"] == "restricted"
+    assert metadata["is_primary_source"] is True
+    assert metadata["citation_policy"] == "interne_only"
+    assert metadata["rights_status"] == "internal"
+
+
+def test_ingest_text_returns_400_on_invalid_metadata_json():
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documentary.ingest_text(
+                title="Note texte",
+                text="Contenu texte",
+                source_code="source",
+                metadata_json="{invalid",
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["error"] == "invalid_metadata_json"
+
+
+def test_ingest_pdf_stores_enriched_metadata_and_extraction(monkeypatch):
+    cursor = CapturingCursor()
+
+    async def fake_extract_pdf_with_optional_ocr(path, *, ocr_client=None):
+        return FakePdfExtraction()
+
+    monkeypatch.setattr(
+        documentary,
+        "save_uploaded_file",
+        lambda filename, content: ("/tmp/document.pdf", "digest"),
+    )
+    monkeypatch.setattr(
+        documentary,
+        "extract_pdf_with_optional_ocr",
+        fake_extract_pdf_with_optional_ocr,
+    )
+    monkeypatch.setattr(documentary, "get_ocr_client", lambda: None)
+    monkeypatch.setattr(
+        documentary,
+        "get_connection",
+        lambda: CapturingConnection(cursor),
+    )
+
+    asyncio.run(
+        documentary.ingest_pdf(
+            FakePdfUploadFile(),
+            source_code=" PDF ",
+            metadata_json=json.dumps(
+                {
+                    "data_tags": ["corpus", "presse"],
+                    "service_family": "rapport",
+                    "service_ids": ["XVI.1"],
+                    "source_url": "https://example.test/pdf",
+                    "publication_date": "2026-05-01",
+                    "freshness_status": "current",
+                }
+            ),
+        )
+    )
+    metadata = _document_insert_metadata(cursor)
+
+    assert metadata["source_code"] == "pdf"
+    assert metadata["data_tags"] == ["corpus", "presse"]
+    assert metadata["service_family"] == "rapport"
+    assert metadata["service_ids"] == ["XVI.1"]
+    assert metadata["source_url"] == "https://example.test/pdf"
+    assert metadata["publication_date"] == "2026-05-01"
+    assert metadata["freshness_status"] == "current"
+    assert metadata["extraction"]["status"] == "success"
+    assert metadata["extracted_pages"][0]["page"] == 1
 
 
 def test_ingest_pdf_returns_409_on_duplicate_sha256(monkeypatch):

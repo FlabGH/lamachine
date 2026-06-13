@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, date, datetime
 from typing import Any
 
 
@@ -96,6 +97,76 @@ USAGE_PROBATOIRE_VALUES = {
     "a_verifier",
 }
 
+DATA_TAG_VALUES = {
+    "web",
+    "presse",
+    "sondages",
+    "electoral",
+    "insee",
+    "juridique",
+    "parlement",
+    "social",
+    "corpus",
+    "interne",
+    "aucune",
+}
+
+SERVICE_FAMILY_VALUES = {
+    "bibliotheque",
+    "programme",
+    "discours",
+    "debat",
+    "crise",
+    "territoire",
+    "interview",
+    "presse",
+    "rapport",
+    "transverse",
+    "autre",
+}
+
+VISIBILITY_SCOPE_VALUES = {
+    "public",
+    "interne",
+    "restreint",
+    "organisation",
+}
+
+ACCESS_LEVEL_VALUES = {
+    "open",
+    "authenticated",
+    "restricted",
+    "admin",
+}
+
+FRESHNESS_STATUS_VALUES = {
+    "current",
+    "stale",
+    "archived",
+    "unknown",
+}
+
+LANGUAGE_VALUES = {
+    "fr",
+    "en",
+    "multi",
+    "unknown",
+}
+
+CITATION_POLICY_VALUES = {
+    "citable",
+    "non_citable",
+    "interne_only",
+    "a_verifier",
+}
+
+RIGHTS_STATUS_VALUES = {
+    "open",
+    "copyrighted",
+    "internal",
+    "unknown",
+}
+
 DOCUMENT_METADATA_KEYS = {
     "title",
     "source_code",
@@ -112,6 +183,22 @@ DOCUMENT_METADATA_KEYS = {
     "validated_by",
     "validated_at",
     "theme_tags",
+    "data_tags",
+    "service_family",
+    "service_ids",
+    "visibility_scope",
+    "organization_id",
+    "access_level",
+    "source_url",
+    "publication_date",
+    "collected_at",
+    "freshness_status",
+    "language",
+    "geographic_scope",
+    "temporal_scope",
+    "is_primary_source",
+    "citation_policy",
+    "rights_status",
 }
 
 CRITICAL_CHUNK_METADATA_KEYS = {
@@ -146,6 +233,16 @@ def _normalize_optional_text(metadata: dict[str, Any], key: str) -> str | None:
     return normalized or None
 
 
+def _normalize_optional_free_text(metadata: dict[str, Any], key: str) -> str | None:
+    value = metadata.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid document metadata key: {key}")
+    normalized = value.strip()
+    return normalized or None
+
+
 def _normalize_enum(
     metadata: dict[str, Any],
     key: str,
@@ -158,6 +255,92 @@ def _normalize_enum(
             f"Allowed values: {', '.join(sorted(allowed_values))}"
         )
     return value
+
+
+def _normalize_optional_enum(
+    metadata: dict[str, Any],
+    key: str,
+    allowed_values: set[str],
+    default: str,
+) -> str:
+    value = metadata.get(key)
+    if value is None:
+        return default
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Invalid document metadata key: {key}")
+    normalized = value.strip().lower()
+    if normalized not in allowed_values:
+        raise ValueError(
+            f"Invalid document metadata value for {key}: {normalized}. "
+            f"Allowed values: {', '.join(sorted(allowed_values))}"
+        )
+    return normalized
+
+
+def _normalize_optional_string_list(
+    metadata: dict[str, Any],
+    key: str,
+    *,
+    default: list[str],
+    allowed_values: set[str] | None = None,
+    lowercase: bool = True,
+) -> list[str]:
+    value = metadata.get(key)
+    if value is None:
+        return list(default)
+    if not isinstance(value, list):
+        raise ValueError(f"Invalid document metadata key: {key}")
+
+    normalized_items = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{key} must contain only strings")
+        normalized = item.strip()
+        if lowercase:
+            normalized = normalized.lower()
+        if not normalized:
+            continue
+        if allowed_values is not None and normalized not in allowed_values:
+            raise ValueError(
+                f"Invalid document metadata value for {key}: {normalized}. "
+                f"Allowed values: {', '.join(sorted(allowed_values))}"
+            )
+        normalized_items.append(normalized)
+
+    return normalized_items
+
+
+def _normalize_optional_bool(
+    metadata: dict[str, Any],
+    key: str,
+    default: bool,
+) -> bool:
+    value = metadata.get(key)
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise ValueError(f"Invalid document metadata key: {key}")
+    return value
+
+
+def _normalize_optional_iso_date_text(metadata: dict[str, Any], key: str) -> str | None:
+    value = metadata.get(key)
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Invalid document metadata key: {key}")
+
+    raw_value = value.strip()
+    try:
+        if "T" in raw_value:
+            return datetime.fromisoformat(raw_value.replace("Z", "+00:00")).isoformat()
+        return date.fromisoformat(raw_value).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"Invalid ISO date metadata key: {key}") from exc
 
 
 def _normalize_theme_tags(metadata: dict[str, Any]) -> list[str]:
@@ -235,14 +418,110 @@ def normalize_document_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
             "qualification_rationale",
         ),
         "validated_by": _normalize_required_text(metadata, "validated_by"),
-        "validated_at": metadata.get("validated_at"),
+        "validated_at": _normalize_optional_iso_date_text(metadata, "validated_at"),
         "theme_tags": _normalize_theme_tags(metadata),
     }
 
-    if normalized["validated_at"] is not None and not isinstance(
-        normalized["validated_at"], str
-    ):
-        raise ValueError("validated_at must be null or a string")
+    ingestion_metadata = normalize_ingestion_metadata(
+        metadata,
+        title=normalized["title"],
+        source_code=normalized["source_code"],
+    )
+
+    return {
+        **ingestion_metadata,
+        **normalized,
+    }
+
+
+def normalize_ingestion_metadata(
+    metadata: dict[str, Any] | None,
+    *,
+    title: str | None = None,
+    source_code: str | None = None,
+) -> dict[str, Any]:
+    source = metadata or {}
+    normalized: dict[str, Any] = {
+        "data_tags": _normalize_optional_string_list(
+            source,
+            "data_tags",
+            default=["corpus"],
+            allowed_values=DATA_TAG_VALUES,
+        ),
+        "service_family": _normalize_optional_enum(
+            source,
+            "service_family",
+            SERVICE_FAMILY_VALUES,
+            "transverse",
+        ),
+        "service_ids": _normalize_optional_string_list(
+            source,
+            "service_ids",
+            default=[],
+            lowercase=False,
+        ),
+        "visibility_scope": _normalize_optional_enum(
+            source,
+            "visibility_scope",
+            VISIBILITY_SCOPE_VALUES,
+            "public",
+        ),
+        "organization_id": _normalize_optional_text(source, "organization_id"),
+        "access_level": _normalize_optional_enum(
+            source,
+            "access_level",
+            ACCESS_LEVEL_VALUES,
+            "open",
+        ),
+        "source_url": _normalize_optional_free_text(source, "source_url"),
+        "publication_date": _normalize_optional_iso_date_text(source, "publication_date"),
+        "collected_at": _normalize_optional_iso_date_text(source, "collected_at")
+        or datetime.now(UTC).isoformat(),
+        "freshness_status": _normalize_optional_enum(
+            source,
+            "freshness_status",
+            FRESHNESS_STATUS_VALUES,
+            "unknown",
+        ),
+        "language": _normalize_optional_enum(
+            source,
+            "language",
+            LANGUAGE_VALUES,
+            "fr",
+        ),
+        "geographic_scope": _normalize_optional_free_text(
+            source,
+            "geographic_scope",
+        ),
+        "temporal_scope": _normalize_optional_free_text(source, "temporal_scope"),
+        "is_primary_source": _normalize_optional_bool(
+            source,
+            "is_primary_source",
+            False,
+        ),
+        "citation_policy": _normalize_optional_enum(
+            source,
+            "citation_policy",
+            CITATION_POLICY_VALUES,
+            "a_verifier",
+        ),
+        "rights_status": _normalize_optional_enum(
+            source,
+            "rights_status",
+            RIGHTS_STATUS_VALUES,
+            "unknown",
+        ),
+    }
+
+    if title is not None:
+        normalized["title"] = title.strip() if title.strip() else title
+    if source_code is not None:
+        normalized["source_code"] = source_code.strip().lower()
+
+    if normalized["visibility_scope"] == "organisation" and not normalized["organization_id"]:
+        raise ValueError(
+            "organization_id is required when visibility_scope is organisation"
+        )
 
     return normalized
 

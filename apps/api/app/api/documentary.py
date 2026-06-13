@@ -28,6 +28,7 @@ from app.services.documentary.chunking import (
 from app.services.documentary.metadata_contract import (
     build_chunk_metadata,
     build_qdrant_payload,
+    normalize_ingestion_metadata,
 )
 
 from app.services.ai.factory import (
@@ -343,6 +344,55 @@ def _chunk_document_metadata(document_metadata: dict | None) -> dict:
         for key, value in document_metadata.items()
         if key not in {"extraction", "extracted_pages"}
     }
+
+
+def _parse_ingestion_metadata_json(metadata_json: str | None) -> dict:
+    if metadata_json is None or not isinstance(metadata_json, str):
+        return {}
+    if not metadata_json.strip():
+        return {}
+    try:
+        parsed = json.loads(metadata_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata_json",
+                "message": str(exc),
+            },
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata_json",
+                "message": "metadata_json must be a JSON object",
+            },
+        )
+    return parsed
+
+
+def _normalize_ingestion_metadata_or_400(
+    metadata_json: str | None,
+    *,
+    title: str,
+    source_code: str,
+) -> dict:
+    parsed = _parse_ingestion_metadata_json(metadata_json)
+    try:
+        return normalize_ingestion_metadata(
+            parsed,
+            title=title,
+            source_code=source_code,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata",
+                "message": str(exc),
+            },
+        ) from exc
 
 
 def _chunking_config_from_index_version(index_version: dict) -> ChunkingConfig:
@@ -1406,7 +1456,15 @@ async def ingest_pdf(
     source_code: str = Form(...),
     origin: str | None = Form(default=None),
     author: str | None = Form(default=None),
+    metadata_json: str | None = Form(default=None),
 ) -> IngestionResponse:
+    title = file.filename or source_code
+    normalized_source_code = source_code.strip().lower()
+    functional_metadata = _normalize_ingestion_metadata_or_400(
+        metadata_json,
+        title=title,
+        source_code=normalized_source_code,
+    )
     content = await file.read()
     storage_path, digest = save_uploaded_file(file.filename or "upload.pdf", content)
     extraction = await extract_pdf_with_optional_ocr(
@@ -1414,8 +1472,10 @@ async def ingest_pdf(
         ocr_client=get_ocr_client(),
     )
     raw_text = extraction.raw_text
-    title = file.filename or source_code
-    document_metadata = extraction.metadata()
+    document_metadata = {
+        **functional_metadata,
+        **extraction.metadata(),
+    }
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -1425,7 +1485,7 @@ async def ingest_pdf(
                 VALUES (%s, 'pdf', %s, %s)
                 RETURNING id
                 """,
-                (source_code, origin, author),
+                (normalized_source_code, origin, author),
             )
             source_id = cur.fetchone()["id"]
 
@@ -1474,8 +1534,9 @@ async def ingest_pdf(
                     json.dumps(
                         {
                             "filename": file.filename,
-                            "source_code": source_code,
+                            "source_code": normalized_source_code,
                             "extraction_status": extraction.status,
+                            "metadata": functional_metadata,
                         }
                     ),
                     json.dumps(
@@ -1532,9 +1593,16 @@ async def ingest_text(
     source_code: str = Form(...),
     origin: str | None = Form(default=None),
     author: str | None = Form(default=None),
+    metadata_json: str | None = Form(default=None),
 ) -> IngestionResponse:
     raw_text = normalize_text(text)
     digest = sha256_bytes(raw_text.encode("utf-8"))
+    normalized_source_code = source_code.strip().lower()
+    document_metadata = _normalize_ingestion_metadata_or_400(
+        metadata_json,
+        title=title,
+        source_code=normalized_source_code,
+    )
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -1544,7 +1612,7 @@ async def ingest_text(
                 VALUES (%s, 'text', %s, %s)
                 RETURNING id
                 """,
-                (source_code, origin, author),
+                (normalized_source_code, origin, author),
             )
             source_id = cur.fetchone()["id"]
 
@@ -1552,12 +1620,18 @@ async def ingest_text(
                 """
                 INSERT INTO documents (
                     source_id, title, filename, mime_type,
-                    storage_path, sha256, status, raw_text
+                    storage_path, sha256, status, raw_text, metadata
                 )
-                VALUES (%s, %s, NULL, 'text/plain', NULL, %s, 'parsed', %s)
+                VALUES (%s, %s, NULL, 'text/plain', NULL, %s, 'parsed', %s, %s::jsonb)
                 RETURNING id
                 """,
-                (source_id, title, digest, raw_text),
+                (
+                    source_id,
+                    title,
+                    digest,
+                    raw_text,
+                    json.dumps(document_metadata),
+                ),
             )
             document_id = cur.fetchone()["id"]
 
@@ -1570,7 +1644,13 @@ async def ingest_text(
                 (
                     "ingestion",
                     "succeeded",
-                    json.dumps({"title": title, "source_code": source_code}),
+                    json.dumps(
+                        {
+                            "title": title,
+                            "source_code": normalized_source_code,
+                            "metadata": document_metadata,
+                        }
+                    ),
                     json.dumps({"document_id": str(document_id)}),
                 ),
             )

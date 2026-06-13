@@ -1,3 +1,4 @@
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 import pytest
@@ -7,6 +8,7 @@ from app.services.documentary.metadata_contract import (
     build_qdrant_payload,
     missing_chunk_metadata_keys,
     normalize_document_metadata,
+    normalize_ingestion_metadata,
     validate_chunk_metadata,
 )
 
@@ -224,3 +226,147 @@ def test_normalize_document_metadata_serializes_confidence_to_float():
 
     assert metadata["qualification_confidence"] == 1.0
     assert metadata["validated_at"] is None
+
+
+def test_normalize_document_metadata_normalizes_validated_at_iso_datetime():
+    metadata = normalize_document_metadata(
+        _document_metadata(validated_at="2026-05-30T00:00:00Z")
+    )
+
+    assert metadata["validated_at"] == "2026-05-30T00:00:00+00:00"
+
+
+def test_normalize_document_metadata_rejects_invalid_validated_at():
+    with pytest.raises(ValueError, match="validated_at"):
+        normalize_document_metadata(_document_metadata(validated_at="30/05/2026"))
+
+
+def test_normalize_ingestion_metadata_applies_defaults():
+    metadata = normalize_ingestion_metadata({}, title="Document test", source_code=" SRC ")
+
+    assert metadata["title"] == "Document test"
+    assert metadata["source_code"] == "src"
+    assert metadata["data_tags"] == ["corpus"]
+    assert metadata["service_family"] == "transverse"
+    assert metadata["service_ids"] == []
+    assert metadata["visibility_scope"] == "public"
+    assert metadata["access_level"] == "open"
+    assert metadata["freshness_status"] == "unknown"
+    assert metadata["language"] == "fr"
+    assert metadata["is_primary_source"] is False
+    assert metadata["citation_policy"] == "a_verifier"
+    assert metadata["rights_status"] == "unknown"
+    assert metadata["collected_at"]
+
+
+def test_normalize_ingestion_metadata_accepts_enriched_values():
+    metadata = normalize_ingestion_metadata(
+        {
+            "data_tags": [" WEB ", "juridique"],
+            "service_family": "debat",
+            "service_ids": ["I.1", "IV.1"],
+            "visibility_scope": "organisation",
+            "organization_id": " Parti-Test ",
+            "access_level": "restricted",
+            "source_url": "https://example.test/doc.pdf",
+            "publication_date": "2026-06-01",
+            "collected_at": "2026-06-02T10:00:00Z",
+            "freshness_status": "current",
+            "language": "fr",
+            "geographic_scope": "France",
+            "temporal_scope": "2025-2026",
+            "is_primary_source": True,
+            "citation_policy": "citable",
+            "rights_status": "copyrighted",
+        },
+        title="Doc",
+        source_code="PS",
+    )
+
+    assert metadata["data_tags"] == ["web", "juridique"]
+    assert metadata["service_family"] == "debat"
+    assert metadata["service_ids"] == ["I.1", "IV.1"]
+    assert metadata["visibility_scope"] == "organisation"
+    assert metadata["organization_id"] == "parti-test"
+    assert metadata["access_level"] == "restricted"
+    assert metadata["source_url"] == "https://example.test/doc.pdf"
+    assert metadata["publication_date"] == "2026-06-01"
+    assert metadata["collected_at"] == "2026-06-02T10:00:00+00:00"
+    assert metadata["is_primary_source"] is True
+    assert metadata["source_code"] == "ps"
+
+
+def test_normalize_ingestion_metadata_rejects_invalid_data_tag():
+    with pytest.raises(ValueError, match="data_tags"):
+        normalize_ingestion_metadata({"data_tags": ["crawler"]})
+
+
+def test_normalize_ingestion_metadata_requires_organization_id_for_org_scope():
+    with pytest.raises(ValueError, match="organization_id"):
+        normalize_ingestion_metadata({"visibility_scope": "organisation"})
+
+
+def test_normalize_ingestion_metadata_accepts_python_date_values():
+    metadata = normalize_ingestion_metadata(
+        {
+            "publication_date": date(2026, 6, 1),
+            "collected_at": datetime(2026, 6, 2, 10, 30, tzinfo=UTC),
+        }
+    )
+
+    assert metadata["publication_date"] == "2026-06-01"
+    assert metadata["collected_at"] == "2026-06-02T10:30:00+00:00"
+
+
+def test_normalize_ingestion_metadata_rejects_invalid_iso_date():
+    with pytest.raises(ValueError, match="publication_date"):
+        normalize_ingestion_metadata({"publication_date": "juin 2026"})
+
+
+def test_normalize_document_metadata_keeps_enriched_metadata():
+    metadata = normalize_document_metadata(
+        _document_metadata(
+            data_tags=["parlement"],
+            service_family="rapport",
+            service_ids=["XVI.1"],
+            publication_date="2026-01-01",
+            is_primary_source=True,
+        )
+    )
+
+    assert metadata["data_tags"] == ["parlement"]
+    assert metadata["service_family"] == "rapport"
+    assert metadata["service_ids"] == ["XVI.1"]
+    assert metadata["publication_date"] == "2026-01-01"
+    assert metadata["is_primary_source"] is True
+
+
+def test_build_qdrant_payload_inherits_ingestion_metadata():
+    ingestion_metadata = normalize_ingestion_metadata(
+        {
+            "data_tags": ["interne"],
+            "service_family": "crise",
+            "service_ids": ["IV.1"],
+            "visibility_scope": "restreint",
+            "access_level": "admin",
+        },
+        title="Doc crise",
+        source_code="interne",
+    )
+    ingestion_metadata.update(
+        {
+            "chunking_version": "word_window_v1",
+            "split_strategy": "word_window",
+        }
+    )
+    chunk_metadata = _metadata(extra=ingestion_metadata)
+    payload = build_qdrant_payload(
+        chunk_id=UUID("00000000-0000-0000-0000-000000000004"),
+        chunk_metadata=chunk_metadata,
+    )
+
+    assert payload["data_tags"] == ["interne"]
+    assert payload["service_family"] == "crise"
+    assert payload["service_ids"] == ["IV.1"]
+    assert payload["visibility_scope"] == "restreint"
+    assert payload["access_level"] == "admin"
