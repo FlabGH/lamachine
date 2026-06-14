@@ -4,6 +4,7 @@ from app.services.documentary.metadata_contract import (
     DOCUMENT_METADATA_KEYS,
 )
 from app.services.documentary.metadata_registry import (
+    ALLOWED_IMPLEMENTATION_STATUSES,
     ALLOWED_LEVELS,
     ALLOWED_STORAGES,
     ALLOWED_USES,
@@ -52,6 +53,16 @@ def test_registry_uses_are_allowed():
     assert invalid == []
 
 
+def test_registry_implementation_statuses_are_allowed():
+    invalid = [
+        (entry.metadata, entry.implementation_status)
+        for entry in METADATA_REGISTRY
+        if entry.implementation_status not in ALLOWED_IMPLEMENTATION_STATUSES
+    ]
+
+    assert invalid == []
+
+
 def test_qdrant_propagation_requires_chunk_metadata_or_documented_exception():
     invalid = [
         entry.metadata
@@ -86,6 +97,48 @@ def test_deprecated_chunking_aliases_are_documented():
         entry = METADATA_REGISTRY_BY_NAME[alias]
         assert entry.deprecated is True
         assert entry.alias_of == canonical
+        assert entry.implementation_status == "deprecated"
+
+
+def test_model_trace_metadata_are_registered():
+    model_trace_metadata = {
+        "embedding_provider",
+        "embedding_model",
+        "embedding_dimension",
+        "embedding_model_call_id",
+        "reranker_provider",
+        "reranker_model",
+        "rerank_model_call_id",
+        "llm_provider",
+        "llm_model",
+        "llm_model_call_id",
+        "ai_backend_preset",
+        "call_type",
+        "provider",
+        "model",
+        "input_hash",
+        "parameters",
+        "response_metadata",
+        "latency_ms",
+        "token_input",
+        "token_output",
+        "cost_estimate",
+    }
+
+    missing = sorted(model_trace_metadata - set(METADATA_REGISTRY_BY_NAME))
+
+    assert missing == []
+
+
+def test_retrieval_filterable_metadata_are_not_marked_as_fully_implemented():
+    invalid = [
+        entry.metadata
+        for entry in METADATA_REGISTRY
+        if entry.retrieval_filterable
+        and entry.implementation_status not in {"partial", "planned"}
+    ]
+
+    assert invalid == []
 
 
 def test_document_contract_keys_are_registered():
@@ -151,6 +204,7 @@ def test_export_columns_keep_expected_order():
         "level",
         "storage",
         "uses",
+        "implementation_status",
         "allowed_values",
         "default_value",
         "propagate_to_chunk",

@@ -8,7 +8,7 @@ id_*
 AGENTS.md
 SESSION.md
 CODEX.md
-
+AUDIT_METADATA.md
 
 __pycache__/
 *.pyc

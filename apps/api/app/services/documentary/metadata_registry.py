@@ -50,6 +50,13 @@ ALLOWED_USES = {
     "evaluation",
 }
 
+ALLOWED_IMPLEMENTATION_STATUSES = {
+    "implemented",
+    "planned",
+    "partial",
+    "deprecated",
+}
+
 QDRANT_REQUIRED_METADATA = {
     "chunk_id",
     "document_id",
@@ -78,6 +85,7 @@ class MetadataRegistryEntry:
     propagate_to_qdrant: bool = False
     retrieval_filterable: bool = False
     qdrant_required: bool = False
+    implementation_status: str = "implemented"
     deprecated: bool = False
     alias_of: str | None = None
     qdrant_without_chunk_reason: str | None = None
@@ -104,6 +112,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -115,6 +124,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -153,6 +163,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "usage_probatoire",
@@ -172,6 +183,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "mode_qualification",
@@ -222,6 +234,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -234,6 +247,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -246,6 +260,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -257,6 +272,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -269,6 +285,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -279,6 +296,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -291,6 +309,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -309,6 +328,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "collected_at",
@@ -329,6 +349,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "language",
@@ -340,6 +361,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "geographic_scope",
@@ -349,6 +371,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "temporal_scope",
@@ -358,6 +381,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "is_primary_source",
@@ -368,6 +392,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "citation_policy",
@@ -379,6 +404,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "rights_status",
@@ -390,6 +416,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "extraction",
@@ -452,6 +479,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -557,6 +585,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -564,6 +593,30 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         "index_version",
         ("sql_column", "jsonb", "qdrant_payload", "runtime"),
         ("retrieval", "audit"),
+        propagate_to_chunk=True,
+        propagate_to_qdrant=True,
+    ),
+    MetadataRegistryEntry(
+        "embedding_provider",
+        "index_version",
+        ("sql_column", "jsonb", "qdrant_payload", "runtime"),
+        ("retrieval", "evaluation", "audit"),
+        propagate_to_chunk=True,
+        propagate_to_qdrant=True,
+    ),
+    MetadataRegistryEntry(
+        "embedding_model",
+        "index_version",
+        ("sql_column", "jsonb", "qdrant_payload", "runtime"),
+        ("retrieval", "evaluation", "audit"),
+        propagate_to_chunk=True,
+        propagate_to_qdrant=True,
+    ),
+    MetadataRegistryEntry(
+        "embedding_dimension",
+        "index_version",
+        ("sql_column", "jsonb", "qdrant_payload", "runtime"),
+        ("retrieval", "evaluation", "audit"),
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
     ),
@@ -628,6 +681,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         deprecated=True,
         alias_of="chunking_version",
+        implementation_status="deprecated",
     ),
     MetadataRegistryEntry(
         "chunk_size_words",
@@ -638,6 +692,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         deprecated=True,
         alias_of="chunk_size",
+        implementation_status="deprecated",
     ),
     MetadataRegistryEntry(
         "chunk_overlap_words",
@@ -648,6 +703,80 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         deprecated=True,
         alias_of="chunk_overlap",
+        implementation_status="deprecated",
+    ),
+    MetadataRegistryEntry(
+        "ai_backend_preset",
+        "retrieval_run",
+        ("jsonb", "runtime"),
+        ("routing", "evaluation", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "embedding_model_call_id",
+        "retrieval_run",
+        ("jsonb", "runtime"),
+        ("retrieval", "evaluation", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "reranker_provider",
+        "retrieval_run",
+        ("jsonb", "runtime"),
+        ("retrieval", "evaluation", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "reranker_model",
+        "retrieval_run",
+        ("jsonb", "runtime"),
+        ("retrieval", "evaluation", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "rerank_model_call_id",
+        "retrieval_run",
+        ("jsonb", "runtime"),
+        ("retrieval", "evaluation", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "call_type",
+        "retrieval_run",
+        ("sql_column", "runtime"),
+        ("routing", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "provider",
+        "retrieval_run",
+        ("sql_column", "runtime"),
+        ("routing", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "model",
+        "retrieval_run",
+        ("sql_column", "runtime"),
+        ("routing", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "input_hash",
+        "retrieval_run",
+        ("sql_column",),
+        ("audit",),
+    ),
+    MetadataRegistryEntry(
+        "parameters",
+        "retrieval_run",
+        ("sql_column", "jsonb"),
+        ("audit",),
+    ),
+    MetadataRegistryEntry(
+        "response_metadata",
+        "retrieval_run",
+        ("sql_column", "jsonb"),
+        ("audit",),
+    ),
+    MetadataRegistryEntry(
+        "latency_ms",
+        "retrieval_run",
+        ("sql_column", "runtime"),
+        ("evaluation", "audit"),
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "run_id",
@@ -680,6 +809,45 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         "generation_run",
         ("sql_column", "jsonb", "runtime"),
         ("generation", "evaluation", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "llm_provider",
+        "generation_run",
+        ("jsonb", "runtime"),
+        ("generation", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "llm_model",
+        "generation_run",
+        ("jsonb", "runtime"),
+        ("generation", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "llm_model_call_id",
+        "generation_run",
+        ("sql_column", "jsonb", "runtime"),
+        ("generation", "audit"),
+    ),
+    MetadataRegistryEntry(
+        "token_input",
+        "generation_run",
+        ("sql_column", "runtime"),
+        ("generation", "audit"),
+        implementation_status="partial",
+    ),
+    MetadataRegistryEntry(
+        "token_output",
+        "generation_run",
+        ("sql_column", "runtime"),
+        ("generation", "audit"),
+        implementation_status="partial",
+    ),
+    MetadataRegistryEntry(
+        "cost_estimate",
+        "generation_run",
+        ("sql_column", "runtime"),
+        ("generation", "audit"),
+        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "rank_initial",
@@ -725,6 +893,7 @@ EXPORT_COLUMNS = (
     "level",
     "storage",
     "uses",
+    "implementation_status",
     "allowed_values",
     "default_value",
     "propagate_to_chunk",
