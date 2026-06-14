@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,8 +33,10 @@ class QuerySpec:
     query: str
     intent: str
     expected_source_codes: set[str]
+    expected_document_ids: set[str]
     expected_roles: set[str]
     expected_theme_tags: set[str]
+    expected_pages: set[int]
 
 
 def _load_dotenv(path: Path) -> None:
@@ -150,11 +153,40 @@ def _load_queries(path: Path) -> list[QuerySpec]:
                 query=str(item["query"]),
                 intent=str(item.get("intent", "")),
                 expected_source_codes={str(v).lower() for v in item.get("expected_source_codes", [])},
+                expected_document_ids={str(v) for v in item.get("expected_document_ids", [])},
                 expected_roles={str(v).lower() for v in item.get("expected_roles", [])},
                 expected_theme_tags={str(v) for v in item.get("expected_theme_tags", [])},
+                expected_pages=_normalize_expected_pages(item.get("expected_pages", [])),
             )
         )
     return result
+
+
+def _normalize_expected_pages(value: Any) -> set[int]:
+    if value is None:
+        return set()
+    if not isinstance(value, list):
+        raise ValueError("expected_pages must be a list")
+
+    pages: set[int] = set()
+    for item in value:
+        if isinstance(item, int):
+            pages.add(item)
+            continue
+        if isinstance(item, str):
+            raw = item.strip()
+            if not raw:
+                continue
+            if "-" in raw:
+                start_raw, end_raw = raw.split("-", 1)
+                start = int(start_raw.strip())
+                end = int(end_raw.strip())
+                pages.update(range(min(start, end), max(start, end) + 1))
+            else:
+                pages.add(int(raw))
+            continue
+        raise ValueError("expected_pages entries must be integers or page ranges")
+    return pages
 
 
 def _short_excerpt(text: str, limit: int = 260) -> str:
@@ -186,6 +218,38 @@ def _reciprocal_rank(results: list[dict[str, Any]], key: str, expected: set[str]
         return 1.0
     rank = _first_hit_rank(results[:k], key, expected)
     return 0.0 if rank is None else 1.0 / rank
+
+
+def _page_hit_at(results: list[dict[str, Any]], expected_pages: set[int], k: int) -> bool:
+    if not expected_pages:
+        return True
+
+    for result in results[:k]:
+        page_start = result.get("page_start")
+        page_end = result.get("page_end")
+        if page_start is None or page_end is None:
+            continue
+        covered_pages = set(range(int(page_start), int(page_end) + 1))
+        if covered_pages & expected_pages:
+            return True
+    return False
+
+
+def _page_coverage_rate(results: list[dict[str, Any]], k: int) -> float:
+    if not results[:k]:
+        return 0.0
+    with_pages = sum(
+        1
+        for result in results[:k]
+        if result.get("page_start") is not None and result.get("page_end") is not None
+    )
+    return with_pages / len(results[:k])
+
+
+def _average(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
 
 
 def _markdown_escape(value: Any) -> str:
@@ -354,6 +418,7 @@ async def _run_query(
     from app.api.documentary import SearchRequest, search_documents
     from app.db import get_connection
 
+    start_time = time.perf_counter()
     response = await search_documents(
         SearchRequest(
             query=query.query,
@@ -362,6 +427,7 @@ async def _run_query(
             rerank_top_k=rerank_top_k,
         )
     )
+    latency_ms = (time.perf_counter() - start_time) * 1000
 
     scores_by_chunk_id: dict[str, dict[str, Any]] = {}
     with get_connection() as conn:
@@ -408,9 +474,22 @@ async def _run_query(
         "run_id": str(response.run_id),
         "results": results,
         "source_hit": _recall_at(results, "source_code", query.expected_source_codes, top_k),
+        "document_hit": (
+            _recall_at(results, "document_id", query.expected_document_ids, top_k)
+            if query.expected_document_ids
+            else _recall_at(results, "source_code", query.expected_source_codes, top_k)
+        ),
         "role_hit": _recall_at(results, "role_documentaire", query.expected_roles, top_k),
+        "page_hit": _page_hit_at(results, query.expected_pages, top_k),
         "source_mrr": _reciprocal_rank(results, "source_code", query.expected_source_codes, top_k),
+        "document_mrr": (
+            _reciprocal_rank(results, "document_id", query.expected_document_ids, top_k)
+            if query.expected_document_ids
+            else _reciprocal_rank(results, "source_code", query.expected_source_codes, top_k)
+        ),
         "role_mrr": _reciprocal_rank(results, "role_documentaire", query.expected_roles, top_k),
+        "page_coverage_rate": _page_coverage_rate(results, top_k),
+        "latency_ms": latency_ms,
     }
 
 
@@ -471,9 +550,16 @@ def _write_report(
     report_path.parent.mkdir(parents=True, exist_ok=True)
     query_count = len(query_reports)
     source_recall = sum(1 for item in query_reports if item["source_hit"]) / query_count
+    document_recall = sum(1 for item in query_reports if item["document_hit"]) / query_count
     role_recall = sum(1 for item in query_reports if item["role_hit"]) / query_count
+    page_recall = sum(1 for item in query_reports if item["page_hit"]) / query_count
     source_mrr = sum(float(item["source_mrr"]) for item in query_reports) / query_count
+    document_mrr = sum(float(item["document_mrr"]) for item in query_reports) / query_count
     role_mrr = sum(float(item["role_mrr"]) for item in query_reports) / query_count
+    average_page_coverage = _average(
+        [float(item["page_coverage_rate"]) for item in query_reports]
+    )
+    average_latency_ms = _average([float(item["latency_ms"]) for item in query_reports])
 
     lines = [
         "# Phase 3 Retrieval Evaluation",
@@ -489,9 +575,14 @@ def _write_report(
         "## Metrics",
         "",
         f"- Recall@{top_k} source_code: {source_recall:.3f}",
+        f"- Recall@{top_k} document: {document_recall:.3f}",
         f"- Recall@{top_k} role_documentaire: {role_recall:.3f}",
+        f"- Recall@{top_k} page: {page_recall:.3f}",
         f"- MRR source_code: {source_mrr:.3f}",
+        f"- MRR document: {document_mrr:.3f}",
         f"- MRR role_documentaire: {role_mrr:.3f}",
+        f"- Page coverage@{top_k}: {average_page_coverage:.3f}",
+        f"- Latence moyenne recherche: {average_latency_ms:.1f} ms",
         f"- Total chunks: {int(chunk_metrics['total_chunks'])}",
         f"- Chunks sans source_code: {chunk_metrics['missing_source_code_rate']:.3f}",
         f"- Chunks sans role_documentaire: {chunk_metrics['missing_role_documentaire_rate']:.3f}",
@@ -510,10 +601,16 @@ def _write_report(
                 f"- Query: {query.query}",
                 f"- Intent: `{query.intent}`",
                 f"- Expected source_codes: `{', '.join(sorted(query.expected_source_codes))}`",
+                f"- Expected document_ids: `{', '.join(sorted(query.expected_document_ids))}`",
                 f"- Expected roles: `{', '.join(sorted(query.expected_roles))}`",
                 f"- Expected theme_tags: `{', '.join(sorted(query.expected_theme_tags))}`",
+                f"- Expected pages: `{', '.join(str(page) for page in sorted(query.expected_pages))}`",
                 f"- Hit source_code @{top_k}: {'yes' if item['source_hit'] else 'no'}",
+                f"- Hit document @{top_k}: {'yes' if item['document_hit'] else 'no'}",
                 f"- Hit role_documentaire @{top_k}: {'yes' if item['role_hit'] else 'no'}",
+                f"- Hit page @{top_k}: {'yes' if item['page_hit'] else 'no'}",
+                f"- Page coverage @{top_k}: {item['page_coverage_rate']:.3f}",
+                f"- Search latency: {item['latency_ms']:.1f} ms",
                 "",
                 "| rank | initial | score | dense | lexical | rerank | source_code | role_documentaire | theme_tags | pages | document_id | extrait | commentaire |",
                 "|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|---|",

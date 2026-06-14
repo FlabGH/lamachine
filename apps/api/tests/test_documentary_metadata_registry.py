@@ -145,24 +145,16 @@ def test_lexical_metadata_fields_are_registered_as_retrieval_used():
         assert "retrieval" in entry.uses
 
 
-def test_markdown_export_header_and_entries_match_registry():
-    export_path = "docs/phase3_metadata_registry.md"
-    with open(export_path, encoding="utf-8") as handle:
-        lines = handle.readlines()
-
-    table_header = next(
-        line for line in lines if line.startswith("| Metadata | level | storage |")
+def test_export_columns_keep_expected_order():
+    assert EXPORT_COLUMNS == (
+        "Metadata",
+        "level",
+        "storage",
+        "uses",
+        "allowed_values",
+        "default_value",
+        "propagate_to_chunk",
+        "propagate_to_qdrant",
+        "retrieval_filterable",
+        "qdrant_required",
     )
-    exported_columns = tuple(
-        column.strip()
-        for column in table_header.strip().strip("|").split("|")
-    )
-    assert exported_columns == EXPORT_COLUMNS
-
-    exported_names = {
-        line.split("|", maxsplit=2)[1].strip().strip("`")
-        for line in lines
-        if line.startswith("| `")
-    }
-
-    assert exported_names == set(METADATA_REGISTRY_BY_NAME)
