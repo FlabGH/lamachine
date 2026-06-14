@@ -321,13 +321,15 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
     return document_id
 
 
-def _create_index_version(index_name: str, vector_collection: str) -> UUID:
+def _create_index_version(
+    index_name: str,
+    vector_collection: str,
+    chunking_config,
+) -> UUID:
     from app.db import get_connection
     from app.services.ai.factory import get_embedding_client
-    from app.services.documentary.chunking import ChunkingConfig
 
     embedding_client = get_embedding_client()
-    chunking_config = ChunkingConfig()
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -379,6 +381,34 @@ def _create_index_version(index_name: str, vector_collection: str) -> UUID:
                 ),
             )
             return cur.fetchone()["id"]
+
+
+def _chunking_config_from_args(args: argparse.Namespace):
+    from app.services.documentary.chunking import (
+        DEFAULT_CHUNKING_VERSION,
+        DEFAULT_SPLIT_STRATEGY,
+        STRUCTURAL_CHUNKING_VERSION,
+        STRUCTURAL_SPLIT_STRATEGY,
+        ChunkingConfig,
+    )
+
+    split_strategy = args.split_strategy
+    chunking_version = args.chunking_version
+    if chunking_version is None:
+        chunking_version = (
+            STRUCTURAL_CHUNKING_VERSION
+            if split_strategy == STRUCTURAL_SPLIT_STRATEGY
+            else DEFAULT_CHUNKING_VERSION
+        )
+
+    return ChunkingConfig(
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
+        split_strategy=split_strategy or DEFAULT_SPLIT_STRATEGY,
+        min_chunk_size=args.min_chunk_size,
+        max_chunk_size=args.max_chunk_size,
+        chunking_version=chunking_version,
+    )
 
 
 def _get_index_version(index_version_id: UUID) -> dict[str, Any]:
@@ -695,6 +725,7 @@ async def _run(args: argparse.Namespace) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     index_name = args.index_name or f"phase3-step7-eval-{timestamp}"
     vector_collection = args.vector_collection or f"phase3_step7_eval_{timestamp}"
+    chunking_config = _chunking_config_from_args(args)
 
     if args.reuse_index_version_id:
         index_version_id = UUID(args.reuse_index_version_id)
@@ -714,7 +745,11 @@ async def _run(args: argparse.Namespace) -> Path:
             document_ids.append(await _ingest_document(document))
 
         _log(f"Creating index version: {index_name}")
-        index_version_id = _create_index_version(index_name, vector_collection)
+        index_version_id = _create_index_version(
+            index_name,
+            vector_collection,
+            chunking_config,
+        )
         _log(f"Indexing {len(document_ids)} documents into {vector_collection}")
         await _index_documents(document_ids, index_version_id)
 
@@ -758,6 +793,16 @@ def main() -> None:
     parser.add_argument("--index-name", default=None)
     parser.add_argument("--vector-collection", default=None)
     parser.add_argument("--reuse-index-version-id", default=None)
+    parser.add_argument(
+        "--split-strategy",
+        choices=["word_window", "section_aware_window"],
+        default="word_window",
+    )
+    parser.add_argument("--chunking-version", default=None)
+    parser.add_argument("--chunk-size", type=int, default=450)
+    parser.add_argument("--chunk-overlap", type=int, default=80)
+    parser.add_argument("--min-chunk-size", type=int, default=80)
+    parser.add_argument("--max-chunk-size", type=int, default=650)
     args = parser.parse_args()
 
     report_path = asyncio.run(_run(args))

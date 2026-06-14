@@ -7,6 +7,8 @@ from app.api import documentary
 from app.api.documentary import ChunkingPreviewRequest
 from app.services.documentary.chunking import (
     ChunkingConfig,
+    STRUCTURAL_CHUNKING_VERSION,
+    STRUCTURAL_SPLIT_STRATEGY,
     chunk_text,
     deduplicate_chunks,
 )
@@ -111,6 +113,93 @@ def test_deduplicate_chunks_keeps_first_hash_occurrence():
     assert len(unique_chunks) == 1
     assert unique_chunks[0].chunk_index == 0
     assert unique_chunks[0].content == "alpha beta gamma delta"
+
+
+def test_structural_chunking_detects_markdown_heading_path_and_pages():
+    text = "\n".join(
+        [
+            "[PAGE 1]",
+            "# Chapitre 1",
+            "Introduction générale sur l'intelligence artificielle.",
+            "## Mettre l'intelligence artificielle au service du bien commun",
+            " ".join(f"argument{i}" for i in range(45)),
+            "[PAGE 2]",
+            "## Encadrer les plateformes",
+            " ".join(f"plateforme{i}" for i in range(20)),
+        ]
+    )
+
+    chunks = chunk_text(
+        text,
+        config=ChunkingConfig(
+            chunk_size=35,
+            chunk_overlap=5,
+            split_strategy=STRUCTURAL_SPLIT_STRATEGY,
+            min_chunk_size=10,
+            max_chunk_size=50,
+            chunking_version=STRUCTURAL_CHUNKING_VERSION,
+        ),
+    )
+
+    assert len(chunks) >= 3
+    target = next(
+        chunk for chunk in chunks
+        if chunk.metadata.get("section_title")
+        == "Mettre l'intelligence artificielle au service du bien commun"
+    )
+    assert target.metadata["structural_chunking_status"] == "section_aware"
+    assert target.metadata["heading_path"] == [
+        "Chapitre 1",
+        "Mettre l'intelligence artificielle au service du bien commun",
+    ]
+    assert target.metadata["section_level"] == 2
+    assert target.page_start == 1
+    assert "[SECTION Chapitre 1 > Mettre l'intelligence artificielle" in target.content
+
+
+def test_structural_chunking_falls_back_without_usable_structure():
+    chunks = chunk_text(
+        _words(90),
+        config=ChunkingConfig(
+            chunk_size=40,
+            chunk_overlap=5,
+            split_strategy=STRUCTURAL_SPLIT_STRATEGY,
+            min_chunk_size=10,
+            max_chunk_size=50,
+            chunking_version=STRUCTURAL_CHUNKING_VERSION,
+        ),
+    )
+
+    assert chunks
+    assert chunks[0].metadata["structural_chunking_status"] == "fallback_word_window"
+    assert chunks[0].metadata["structural_chunking_warnings"] == [
+        "insufficient_structure"
+    ]
+
+
+def test_structural_chunking_rejects_noisy_heading():
+    text = "\n".join(
+        [
+            "$$$$ //// 1234 //// $$$$",
+            "phrase de corps " + _words(20),
+            "## Titre fiable",
+            _words(20),
+        ]
+    )
+
+    chunks = chunk_text(
+        text,
+        config=ChunkingConfig(
+            chunk_size=50,
+            chunk_overlap=5,
+            split_strategy=STRUCTURAL_SPLIT_STRATEGY,
+            min_chunk_size=10,
+            max_chunk_size=80,
+            chunking_version=STRUCTURAL_CHUNKING_VERSION,
+        ),
+    )
+
+    assert all("$$$$" not in chunk.metadata.get("heading_path", []) for chunk in chunks)
 
 
 def test_chunking_preview_returns_chunks_without_persisting(monkeypatch):

@@ -130,6 +130,21 @@ def test_model_trace_metadata_are_registered():
     assert missing == []
 
 
+def test_structural_chunking_metadata_are_registered():
+    structural_metadata = {
+        "heading_path",
+        "section_level",
+        "structural_chunking_status",
+        "structural_chunking_warnings",
+    }
+
+    for metadata in structural_metadata:
+        entry = METADATA_REGISTRY_BY_NAME[metadata]
+        assert entry.level == "chunk"
+        assert entry.propagate_to_chunk is True
+        assert entry.propagate_to_qdrant is True
+
+
 def test_retrieval_filterable_metadata_status_matches_filter_implementation():
     implemented_filters = {
         "source_code",
