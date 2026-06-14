@@ -1,10 +1,15 @@
 from app.api.documentary import (
     LEXICAL_SEARCH_TEXT_SQL,
     GenerateNoteRequest,
+    SearchMetadataFilters,
     SearchRequest,
+    _build_metadata_filter_sql,
+    _build_qdrant_search_filter,
     _build_lexical_websearch_query,
     _significant_lexical_terms,
 )
+import pytest
+from pydantic import ValidationError
 
 
 INDEX_VERSION_ID = "00000000-0000-0000-0000-000000000000"
@@ -48,6 +53,7 @@ def test_search_request_uses_poc_retrieval_defaults(monkeypatch):
 
     assert request.top_k == 30
     assert request.rerank_top_k == 20
+    assert request.filters is None
 
 
 def test_search_request_defaults_are_configurable_from_env(monkeypatch):
@@ -68,3 +74,55 @@ def test_generate_note_request_uses_same_retrieval_defaults(monkeypatch):
 
     assert request.top_k == 14
     assert request.rerank_top_k == 8
+
+
+def test_search_metadata_filters_normalize_values_and_deduplicate():
+    filters = SearchMetadataFilters(
+        source_code=[" PS ", "ps"],
+        role_documentaire=["Doctrine_Alliee"],
+        service_ids=["I.1", "I.1"],
+    )
+
+    assert filters.active_filters() == {
+        "source_code": ["ps"],
+        "role_documentaire": ["doctrine_alliee"],
+        "service_ids": ["I.1"],
+    }
+
+
+def test_search_metadata_filters_reject_invalid_value():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchMetadataFilters(role_documentaire=["unknown_role"])
+
+    assert "Invalid role_documentaire filter values" in str(exc_info.value)
+
+
+def test_build_qdrant_search_filter_uses_payload_fields():
+    qdrant_filter = _build_qdrant_search_filter(
+        SearchMetadataFilters(
+            source_code=["ps"],
+            theme_tags=["ia"],
+        )
+    )
+
+    assert qdrant_filter is not None
+    assert [condition.key for condition in qdrant_filter.must] == [
+        "source_code",
+        "theme_tags",
+    ]
+    assert qdrant_filter.must[0].match.any == ["ps"]
+    assert qdrant_filter.must[1].match.any == ["ia"]
+
+
+def test_build_metadata_filter_sql_handles_scalar_and_array_fields():
+    sql, params = _build_metadata_filter_sql(
+        SearchMetadataFilters(
+            source_code=["ps"],
+            theme_tags=["ia", "service_public"],
+        ),
+        metadata_expression="document_chunks.metadata",
+    )
+
+    assert "(document_chunks.metadata->>'source_code') = ANY(%s)" in sql
+    assert "(document_chunks.metadata->'theme_tags') ?| %s" in sql
+    assert params == [["ps"], ["ia", "service_public"]]

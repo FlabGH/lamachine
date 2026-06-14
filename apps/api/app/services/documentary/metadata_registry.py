@@ -112,7 +112,6 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
-        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -124,7 +123,6 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
-        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -234,7 +232,6 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
-        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -247,7 +244,6 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
-        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -260,7 +256,6 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
-        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -272,7 +267,6 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
-        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -285,7 +279,6 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
-        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -296,7 +289,6 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
-        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -309,7 +301,6 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
-        implementation_status="partial",
         qdrant_required=True,
     ),
     MetadataRegistryEntry(
@@ -361,7 +352,6 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
-        implementation_status="partial",
     ),
     MetadataRegistryEntry(
         "geographic_scope",

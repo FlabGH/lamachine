@@ -186,7 +186,15 @@ def test_metadata_propagates_from_document_to_chunks_qdrant_and_search_hits(
     def fake_upsert_chunks(client, *, collection_name, points):
         state["qdrant_points"].extend(points)
 
-    def fake_search_chunks(client, *, collection_name, query_vector, limit):
+    def fake_search_chunks(
+        client,
+        *,
+        collection_name,
+        query_vector,
+        limit,
+        query_filter=None,
+    ):
+        state["query_filter"] = query_filter
         return [
             SimpleNamespace(
                 score=0.8,
@@ -242,3 +250,69 @@ def test_metadata_propagates_from_document_to_chunks_qdrant_and_search_hits(
 
     assert qdrant_payload["chunk_id"] == str(CHUNK_ID)
     assert search_response.hits[0].chunk_id == CHUNK_ID
+
+
+def test_metadata_filter_restricts_dense_candidates(monkeypatch):
+    state = {
+        "queries": [],
+        "chunk_rows": {},
+        "qdrant_points": [],
+        "query_filter": None,
+    }
+
+    monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection(state))
+    monkeypatch.setattr(documentary, "get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr(documentary, "get_reranker_client", lambda: FakeReranker())
+    monkeypatch.setattr(documentary, "get_ai_backend_preset_name", lambda: "test")
+    monkeypatch.setattr(documentary, "get_qdrant_client", lambda: object())
+    monkeypatch.setattr(documentary, "ensure_collection", lambda *args, **kwargs: None)
+
+    def fake_upsert_chunks(client, *, collection_name, points):
+        state["qdrant_points"].extend(points)
+
+    def fake_search_chunks(
+        client,
+        *,
+        collection_name,
+        query_vector,
+        limit,
+        query_filter=None,
+    ):
+        state["query_filter"] = query_filter
+        if query_filter.must[0].match.any == ["other_source"]:
+            return []
+        return [
+            SimpleNamespace(
+                score=0.8,
+                payload={"chunk_id": str(CHUNK_ID)},
+            )
+        ]
+
+    monkeypatch.setattr(documentary, "upsert_chunks", fake_upsert_chunks)
+    monkeypatch.setattr(documentary, "search_chunks", fake_search_chunks)
+
+    asyncio.run(
+        documentary.index_document(
+            documentary.IndexRequest(
+                document_id=DOCUMENT_ID,
+                index_version_id=INDEX_VERSION_ID,
+            )
+        )
+    )
+    search_response = asyncio.run(
+        documentary.search_documents(
+            documentary.SearchRequest(
+                query="metadata enrichies",
+                index_version_id=INDEX_VERSION_ID,
+                top_k=5,
+                rerank_top_k=5,
+                filters=documentary.SearchMetadataFilters(
+                    source_code=["other_source"],
+                ),
+            )
+        )
+    )
+
+    assert search_response.hits == []
+    assert state["query_filter"].must[0].key == "source_code"
+    assert state["query_filter"].must[0].match.any == ["other_source"]

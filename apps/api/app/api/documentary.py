@@ -8,7 +8,8 @@ from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from qdrant_client.models import FieldCondition, Filter, MatchAny
 
 import json
 
@@ -26,6 +27,12 @@ from app.services.documentary.chunking import (
     deduplicate_chunks,
 )
 from app.services.documentary.metadata_contract import (
+    ACCESS_LEVEL_VALUES,
+    DATA_TAG_VALUES,
+    LANGUAGE_VALUES,
+    ROLE_DOCUMENTAIRE_VALUES,
+    SERVICE_FAMILY_VALUES,
+    VISIBILITY_SCOPE_VALUES,
     build_chunk_metadata,
     build_qdrant_payload,
     normalize_ingestion_metadata,
@@ -104,6 +111,38 @@ concat_ws(
     replace(COALESCE(metadata->>'theme_tags', ''), '_', ' ')
 )
 """
+SEARCH_FILTER_ARRAY_FIELDS = {"theme_tags", "data_tags", "service_ids"}
+SEARCH_FILTER_ALLOWED_VALUES = {
+    "role_documentaire": ROLE_DOCUMENTAIRE_VALUES,
+    "data_tags": DATA_TAG_VALUES,
+    "service_family": SERVICE_FAMILY_VALUES,
+    "visibility_scope": VISIBILITY_SCOPE_VALUES,
+    "access_level": ACCESS_LEVEL_VALUES,
+    "language": LANGUAGE_VALUES,
+}
+SEARCH_FILTER_LOWERCASE_FIELDS = {
+    "source_code",
+    "role_documentaire",
+    "theme_tags",
+    "data_tags",
+    "service_family",
+    "visibility_scope",
+    "organization_id",
+    "access_level",
+    "language",
+}
+SEARCH_FILTER_FIELDS = {
+    "source_code",
+    "role_documentaire",
+    "theme_tags",
+    "data_tags",
+    "service_family",
+    "service_ids",
+    "visibility_scope",
+    "organization_id",
+    "access_level",
+    "language",
+}
 
 
 def _significant_lexical_terms(query: str) -> list[str]:
@@ -160,6 +199,43 @@ def _adapter_response_metadata(client, raw: dict | None = None) -> dict:
     if raw:
         metadata.update(raw)
     return metadata
+
+
+def _normalize_filter_values(field_name: str, value: list[str] | None) -> list[str] | None:
+    if value is None:
+        return None
+
+    normalized_values: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{field_name} filter values must be strings")
+        normalized = item.strip()
+        if field_name in SEARCH_FILTER_LOWERCASE_FIELDS:
+            normalized = normalized.lower()
+        if not normalized:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        normalized_values.append(normalized)
+
+    if not normalized_values:
+        raise ValueError(f"{field_name} filter must contain at least one value")
+
+    allowed_values = SEARCH_FILTER_ALLOWED_VALUES.get(field_name)
+    if allowed_values is not None:
+        invalid_values = [
+            item for item in normalized_values
+            if item not in allowed_values
+        ]
+        if invalid_values:
+            raise ValueError(
+                f"Invalid {field_name} filter values: {', '.join(invalid_values)}. "
+                f"Allowed values: {', '.join(sorted(allowed_values))}"
+            )
+
+    return normalized_values
 
 
 class RunStatus(str, Enum):
@@ -280,11 +356,50 @@ class RunRead(BaseModel):
     status: RunStatus
 
 
+class SearchMetadataFilters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_code: list[str] | None = None
+    role_documentaire: list[str] | None = None
+    theme_tags: list[str] | None = None
+    data_tags: list[str] | None = None
+    service_family: list[str] | None = None
+    service_ids: list[str] | None = None
+    visibility_scope: list[str] | None = None
+    organization_id: list[str] | None = None
+    access_level: list[str] | None = None
+    language: list[str] | None = None
+
+    @field_validator(
+        "source_code",
+        "role_documentaire",
+        "theme_tags",
+        "data_tags",
+        "service_family",
+        "service_ids",
+        "visibility_scope",
+        "organization_id",
+        "access_level",
+        "language",
+    )
+    @classmethod
+    def normalize_filter_values(
+        cls,
+        value: list[str] | None,
+        info,
+    ) -> list[str] | None:
+        return _normalize_filter_values(info.field_name, value)
+
+    def active_filters(self) -> dict[str, list[str]]:
+        return self.model_dump(exclude_none=True)
+
+
 class SearchRequest(BaseModel):
     query: str
     index_version_id: UUID
     top_k: int = Field(default_factory=_default_search_top_k)
     rerank_top_k: int = Field(default_factory=_default_rerank_top_k)
+    filters: SearchMetadataFilters | None = None
 
 
 class SearchHit(BaseModel):
@@ -313,6 +428,7 @@ class GenerateNoteRequest(BaseModel):
     )
     top_k: int = Field(default_factory=_default_search_top_k)
     rerank_top_k: int = Field(default_factory=_default_rerank_top_k)
+    filters: SearchMetadataFilters | None = None
     prompt_version: str = "note_riposte_v1"
 
 
@@ -329,6 +445,53 @@ class GenerateNoteResponse(BaseModel):
     generation_run_id: UUID
     retrieval_run_id: UUID
     outputs: list[OutputRead]
+
+
+def _search_filter_payload(filters: SearchMetadataFilters | None) -> dict[str, list[str]]:
+    if filters is None:
+        return {}
+    return filters.active_filters()
+
+
+def _build_qdrant_search_filter(
+    filters: SearchMetadataFilters | None,
+) -> Filter | None:
+    active_filters = _search_filter_payload(filters)
+    if not active_filters:
+        return None
+
+    return Filter(
+        must=[
+            FieldCondition(
+                key=field,
+                match=MatchAny(any=values),
+            )
+            for field, values in active_filters.items()
+        ],
+    )
+
+
+def _build_metadata_filter_sql(
+    filters: SearchMetadataFilters | None,
+    *,
+    metadata_expression: str = "metadata",
+) -> tuple[str, list[list[str]]]:
+    active_filters = _search_filter_payload(filters)
+    if not active_filters:
+        return "", []
+
+    clauses: list[str] = []
+    params: list[list[str]] = []
+    for field, values in active_filters.items():
+        if field not in SEARCH_FILTER_FIELDS:
+            raise ValueError(f"Unsupported search metadata filter: {field}")
+        if field in SEARCH_FILTER_ARRAY_FIELDS:
+            clauses.append(f"({metadata_expression}->'{field}') ?| %s")
+        else:
+            clauses.append(f"({metadata_expression}->>'{field}') = ANY(%s)")
+        params.append(values)
+
+    return " AND " + " AND ".join(clauses), params
 
 
 @router.post("/sources", response_model=SourceRead)
@@ -844,6 +1007,12 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
     embedding_client = get_embedding_client()
     reranker = get_reranker_client()
     ai_backend_preset = get_ai_backend_preset_name()
+    search_filters = _search_filter_payload(payload.filters)
+    qdrant_filter = _build_qdrant_search_filter(payload.filters)
+    lexical_filter_sql, lexical_filter_params = _build_metadata_filter_sql(
+        payload.filters,
+        metadata_expression="metadata",
+    )
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -884,6 +1053,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                             "reranker_model": reranker.model,
                             "dense_weight": DENSE_WEIGHT,
                             "lexical_weight": LEXICAL_WEIGHT,
+                            "metadata_filters": search_filters,
                         }
                     ),
                     json.dumps({}),
@@ -946,6 +1116,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                 collection_name=index_version["vector_collection"],
                 query_vector=query_vector,
                 limit=payload.top_k,
+                query_filter=qdrant_filter,
             )
 
             dense_scores_by_chunk_id = {
@@ -973,6 +1144,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                             {LEXICAL_SEARCH_TEXT_SQL} AS lexical_text
                         FROM document_chunks
                         WHERE index_version_id = %s
+                        {lexical_filter_sql}
                     )
                     SELECT
                         lexical_chunks.id,
@@ -999,6 +1171,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                     (
                         lexical_query,
                         payload.index_version_id,
+                        *lexical_filter_params,
                         payload.top_k,
                     ),
                 )
@@ -1033,6 +1206,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                                 "embedding_provider": embedding_client.provider,
                                 "embedding_model": embedding_client.model,
                                 "embedding_dimension": query_embedding.dimension,
+                                "metadata_filters": search_filters,
                             }
                         ),
                         run_id,
@@ -1204,6 +1378,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                             "reranker_model": reranker.model,
                             "dense_weight": DENSE_WEIGHT,
                             "lexical_weight": LEXICAL_WEIGHT,
+                            "metadata_filters": search_filters,
                         }
                     ),
                     run_id,
@@ -1224,6 +1399,7 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
             index_version_id=payload.index_version_id,
             top_k=payload.top_k,
             rerank_top_k=payload.rerank_top_k,
+            filters=payload.filters,
         )
     )
 
@@ -1296,6 +1472,7 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                             "personas": [p.value for p in payload.personas],
                             "retrieval_run_id": str(search_response.run_id),
                             "prompt_version": payload.prompt_version,
+                            "metadata_filters": _search_filter_payload(payload.filters),
                             "ai_backend_preset": ai_backend_preset,
                             "llm_provider": llm.provider,
                             "llm_model": llm.model,
@@ -1307,6 +1484,7 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                             "outputs": len(payload.personas),
                             "retrieval_run_id": str(search_response.run_id),
                             "prompt_version": payload.prompt_version,
+                            "metadata_filters": _search_filter_payload(payload.filters),
                             "ai_backend_preset": ai_backend_preset,
                             "llm_provider": llm.provider,
                             "llm_model": llm.model,

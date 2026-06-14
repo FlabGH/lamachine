@@ -4,7 +4,7 @@ import os
 from uuid import UUID
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, Filter, PointStruct, VectorParams
 
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
@@ -57,10 +57,12 @@ def search_chunks(
     collection_name: str,
     query_vector: list[float],
     limit: int,
+    query_filter: Filter | None = None,
 ):
     result = client.query_points(
         collection_name=collection_name,
         query=query_vector,
+        query_filter=query_filter,
         limit=limit,
         with_payload=True,
     )

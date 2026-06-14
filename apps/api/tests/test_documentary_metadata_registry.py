@@ -130,13 +130,29 @@ def test_model_trace_metadata_are_registered():
     assert missing == []
 
 
-def test_retrieval_filterable_metadata_are_not_marked_as_fully_implemented():
-    invalid = [
-        entry.metadata
-        for entry in METADATA_REGISTRY
-        if entry.retrieval_filterable
-        and entry.implementation_status not in {"partial", "planned"}
-    ]
+def test_retrieval_filterable_metadata_status_matches_filter_implementation():
+    implemented_filters = {
+        "source_code",
+        "role_documentaire",
+        "theme_tags",
+        "data_tags",
+        "service_family",
+        "service_ids",
+        "visibility_scope",
+        "organization_id",
+        "access_level",
+        "language",
+    }
+
+    invalid = []
+    for entry in METADATA_REGISTRY:
+        if not entry.retrieval_filterable:
+            continue
+        if entry.metadata in implemented_filters:
+            if entry.implementation_status != "implemented":
+                invalid.append((entry.metadata, entry.implementation_status))
+        elif entry.implementation_status not in {"partial", "planned"}:
+            invalid.append((entry.metadata, entry.implementation_status))
 
     assert invalid == []
 
