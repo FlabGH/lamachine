@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import UUID
+
+import pytest
+from fastapi import HTTPException
 
 from app.api import consultation
 from main import app
@@ -55,6 +60,28 @@ class FakeCursor:
             ],
         }
 
+        if "FROM index_versions" in compact_query and "COUNT(*) OVER()" in compact_query:
+            self._result = [
+                {
+                    "id": INDEX_VERSION_ID,
+                    "name": "active-test",
+                    "embedding_provider": "mistral",
+                    "embedding_model": "mistral-embed",
+                    "embedding_dimension": 1024,
+                    "vector_collection": "test_collection",
+                    "chunking_version": "word_window_v1",
+                    "split_strategy": "word_window",
+                    "chunk_size": 450,
+                    "chunk_overlap": 80,
+                    "min_chunk_size": 80,
+                    "max_chunk_size": 650,
+                    "is_active": True,
+                    "created_at": now,
+                    "total_count": 1,
+                }
+            ]
+            return
+
         if "FROM index_versions" in compact_query:
             self._result = {
                 "id": INDEX_VERSION_ID,
@@ -74,6 +101,19 @@ class FakeCursor:
             }
             return
 
+        if "FROM sources" in compact_query and "WHERE sources." in compact_query:
+            self._result = {
+                "source_id": SOURCE_ID,
+                "source_code": "ps",
+                "source_type": "pdf",
+                "origin": "manifest",
+                "author": "PS",
+                "published_at": now,
+                "document_count": 1,
+                "chunk_count": 1,
+            }
+            return
+
         if "FROM sources" in compact_query:
             self._result = [
                 {
@@ -88,6 +128,19 @@ class FakeCursor:
                     "total_count": 1,
                 }
             ]
+            return
+
+        if "COUNT(*)::int AS chunk_count" in compact_query:
+            self._result = {
+                "chunk_count": 1,
+                "chunks_without_source_code": 0,
+                "chunks_without_role_documentaire": 0,
+                "chunks_without_pages": 0,
+            }
+            return
+
+        if compact_query.startswith("UPDATE index_versions"):
+            self._result = None
             return
 
         if (
@@ -249,6 +302,18 @@ def test_api_v1_alias_is_mounted():
 
     assert "/v1/search/capabilities" in paths
     assert "/api/v1/search/capabilities" in paths
+    assert "/v1/search" in paths
+    assert "/api/v1/search" in paths
+
+
+def test_legacy_create_source_endpoint_is_deprecated_in_openapi():
+    routes = [
+        route for route in app.routes
+        if getattr(route, "path", None) == "/documentary/sources"
+    ]
+
+    assert routes
+    assert routes[0].deprecated is True
 
 
 def test_search_capabilities_distinguish_implemented_and_planned_filters():
@@ -291,6 +356,26 @@ def test_active_index_version_contract(monkeypatch):
     assert response.id == INDEX_VERSION_ID
     assert response.embedding_model == "mistral-embed"
     assert "api_key" not in response.model_dump_json().lower()
+
+
+def test_index_versions_are_listed_with_contract(monkeypatch):
+    _patch_connection(monkeypatch)
+
+    response = consultation.list_index_versions(limit=10, offset=0)
+
+    assert response.total == 1
+    assert response.items[0].id == INDEX_VERSION_ID
+    assert response.items[0].vector_collection == "test_collection"
+
+
+def test_source_can_be_read_by_id_and_code(monkeypatch):
+    _patch_connection(monkeypatch)
+
+    by_id = consultation.get_source(SOURCE_ID)
+    by_code = consultation.get_source_by_code("PS")
+
+    assert by_id.source_code == "ps"
+    assert by_code.source_id == SOURCE_ID
 
 
 def test_documents_do_not_expose_sensitive_fields(monkeypatch):
@@ -375,3 +460,100 @@ def test_retrieval_hits_expose_scores_and_safe_metadata(monkeypatch):
     assert item.rerank_score == 0.95
     assert item.metadata["source_code"] == "ps"
     assert "extracted_pages" not in item.metadata
+
+
+def test_stable_search_facade_reuses_documentary_search_and_adds_scores(monkeypatch):
+    _patch_connection(monkeypatch)
+
+    async def fake_search(payload):
+        assert payload.filters.active_filters() == {"source_code": ["ps"]}
+        return SimpleNamespace(
+            run_id=RUN_ID,
+            hits=[
+                SimpleNamespace(
+                    chunk_id=CHUNK_ID,
+                    document_id=DOCUMENT_ID,
+                    rank=1,
+                    score=0.95,
+                    content="Contenu chunk",
+                    metadata={
+                        "source_code": "ps",
+                        "extraction": {"status": "success"},
+                    },
+                )
+            ],
+        )
+
+    monkeypatch.setattr(consultation, "documentary_search_documents", fake_search)
+
+    response = asyncio.run(
+        consultation.search_documents(
+            consultation.StableSearchRequest(
+                query="IA bien commun",
+                index_version_id=INDEX_VERSION_ID,
+                filters=consultation.SearchMetadataFilters(source_code=["PS"]),
+            )
+        )
+    )
+
+    assert response.run_id == RUN_ID
+    assert response.filters_applied == {"source_code": ["ps"]}
+    assert response.hits[0].rank_initial == 2
+    assert response.hits[0].dense_score == 0.8
+    assert response.hits[0].lexical_score == 0.4
+    assert response.hits[0].rerank_score == 0.95
+    assert "extraction" not in response.hits[0].metadata
+
+
+def test_stable_search_converts_missing_index_to_404(monkeypatch):
+    async def fake_search(payload):
+        raise ValueError(f"Index version not found: {payload.index_version_id}")
+
+    monkeypatch.setattr(consultation, "documentary_search_documents", fake_search)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            consultation.search_documents(
+                consultation.StableSearchRequest(
+                    query="test",
+                    index_version_id=INDEX_VERSION_ID,
+                )
+            )
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+def test_promote_index_version_checks_qdrant_and_updates_active(monkeypatch):
+    _patch_connection(monkeypatch)
+
+    class FakeQdrant:
+        def count(self, *, collection_name, exact):
+            assert collection_name == "test_collection"
+            assert exact is True
+            return SimpleNamespace(count=1)
+
+    monkeypatch.setattr(consultation, "get_qdrant_client", lambda: FakeQdrant())
+
+    response = consultation.promote_index_version(INDEX_VERSION_ID)
+
+    assert response.index_version_id == INDEX_VERSION_ID
+    assert response.is_active is True
+    assert response.chunk_count == 1
+    assert response.qdrant_point_count == 1
+
+
+def test_promote_index_version_returns_503_when_qdrant_unavailable(monkeypatch):
+    _patch_connection(monkeypatch)
+
+    class BrokenQdrant:
+        def count(self, *, collection_name, exact):
+            raise RuntimeError("qdrant down")
+
+    monkeypatch.setattr(consultation, "get_qdrant_client", lambda: BrokenQdrant())
+
+    with pytest.raises(HTTPException) as exc_info:
+        consultation.promote_index_version(INDEX_VERSION_ID)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["error"] == "qdrant_unavailable"

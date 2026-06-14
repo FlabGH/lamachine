@@ -7,8 +7,16 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.documentary import (
+    SearchMetadataFilters,
+    SearchRequest as DocumentarySearchRequest,
+    _default_rerank_top_k,
+    _default_search_top_k,
+    search_documents as documentary_search_documents,
+)
 from app.db import get_connection
 from app.services.documentary.metadata_registry import METADATA_REGISTRY
+from app.services.documentary.vector_store import get_qdrant_client
 
 
 router = APIRouter(prefix="/v1", tags=["consultation"])
@@ -91,6 +99,19 @@ class IndexVersionRead(StrictModel):
     created_at: datetime | None = None
 
 
+class IndexVersionListResponse(PaginatedResponse):
+    items: list[IndexVersionRead]
+
+
+class PromoteIndexVersionResponse(StrictModel):
+    index_version_id: UUID
+    is_active: bool
+    vector_collection: str
+    chunk_count: int
+    qdrant_point_count: int
+    warnings: list[str] = Field(default_factory=list)
+
+
 class SourceSummary(StrictModel):
     source_id: UUID
     source_code: str
@@ -104,6 +125,10 @@ class SourceSummary(StrictModel):
 
 class SourceListResponse(PaginatedResponse):
     items: list[SourceSummary]
+
+
+class SourceDetail(SourceSummary):
+    pass
 
 
 class DocumentSummary(StrictModel):
@@ -195,6 +220,34 @@ class RetrievalHitListResponse(PaginatedResponse):
     items: list[RetrievalHitDetail]
 
 
+class StableSearchRequest(StrictModel):
+    query: str
+    index_version_id: UUID
+    top_k: int = Field(default_factory=_default_search_top_k, ge=1, le=100)
+    rerank_top_k: int = Field(default_factory=_default_rerank_top_k, ge=1, le=100)
+    filters: SearchMetadataFilters | None = None
+
+
+class StableSearchHit(StrictModel):
+    chunk_id: UUID
+    document_id: UUID
+    rank_initial: int | None = None
+    rank_final: int
+    score: float | None = None
+    dense_score: float | None = None
+    lexical_score: float | None = None
+    rerank_score: float | None = None
+    content: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class StableSearchResponse(StrictModel):
+    run_id: UUID
+    index_version_id: UUID
+    filters_applied: dict[str, list[str]] = Field(default_factory=dict)
+    hits: list[StableSearchHit]
+
+
 def _metadata_description(metadata: str) -> str:
     descriptions = {
         "source_code": "Identifiant court et canonique de la source.",
@@ -274,6 +327,48 @@ def _without_total_count(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _source_from_row(row: dict[str, Any]) -> SourceSummary:
+    return SourceSummary(**_without_total_count(row))
+
+
+def _fetch_retrieval_score_rows(run_id: UUID) -> dict[UUID, dict[str, Any]]:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    chunk_id,
+                    rank_initial,
+                    rank_final,
+                    dense_score,
+                    lexical_score,
+                    rerank_score
+                FROM retrieval_hits
+                WHERE run_id = %s
+                """,
+                (run_id,),
+            )
+            rows = cur.fetchall()
+    return {row["chunk_id"]: row for row in rows}
+
+
+def _qdrant_point_count(collection_name: str) -> int:
+    try:
+        return int(
+            get_qdrant_client()
+            .count(collection_name=collection_name, exact=True)
+            .count
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "qdrant_unavailable",
+                "message": "Unable to verify Qdrant collection before promotion",
+            },
+        ) from exc
+
+
 @router.get("/metadata/catalog", response_model=MetadataCatalogResponse)
 def get_metadata_catalog(
     level: str | None = None,
@@ -327,6 +422,35 @@ def get_search_capabilities() -> SearchCapabilitiesResponse:
     )
 
 
+@router.get("/index-versions", response_model=IndexVersionListResponse)
+def list_index_versions(
+    limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+) -> IndexVersionListResponse:
+    bounded_limit = _bounded_limit(limit)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *, COUNT(*) OVER()::int AS total_count
+                FROM index_versions
+                ORDER BY created_at DESC, name
+                LIMIT %s OFFSET %s
+                """,
+                (bounded_limit, offset),
+            )
+            rows = cur.fetchall()
+    return IndexVersionListResponse(
+        items=[
+            IndexVersionRead(**_without_total_count(row))
+            for row in rows
+        ],
+        limit=bounded_limit,
+        offset=offset,
+        total=_total(rows[0] if rows else None),
+    )
+
+
 @router.get("/index-versions/active", response_model=IndexVersionRead)
 def get_active_index_version() -> IndexVersionRead:
     with get_connection() as conn:
@@ -344,6 +468,110 @@ def get_active_index_version() -> IndexVersionRead:
     if row is None:
         raise HTTPException(status_code=404, detail="No active index version found")
     return IndexVersionRead(**row)
+
+
+@router.post(
+    "/index-versions/{index_version_id}/promote",
+    response_model=PromoteIndexVersionResponse,
+    include_in_schema=False,
+)
+def promote_index_version(index_version_id: UUID) -> PromoteIndexVersionResponse:
+    warnings: list[str] = []
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM index_versions
+                WHERE id = %s
+                """,
+                (index_version_id,),
+            )
+            index_version = cur.fetchone()
+            if index_version is None:
+                raise HTTPException(status_code=404, detail="Index version not found")
+
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*)::int AS chunk_count,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(metadata->>'source_code', '') = ''
+                    )::int AS chunks_without_source_code,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(metadata->>'role_documentaire', '') = ''
+                    )::int AS chunks_without_role_documentaire,
+                    COUNT(*) FILTER (
+                        WHERE page_start IS NULL AND page_end IS NULL
+                    )::int AS chunks_without_pages
+                FROM document_chunks
+                WHERE index_version_id = %s
+                """,
+                (index_version_id,),
+            )
+            checks = cur.fetchone()
+            chunk_count = int(checks["chunk_count"] or 0)
+            if chunk_count == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "empty_index_version",
+                        "message": "Index version has no chunks",
+                    },
+                )
+            if checks["chunks_without_source_code"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "missing_source_code",
+                        "message": "Some chunks do not have source_code metadata",
+                        "count": checks["chunks_without_source_code"],
+                    },
+                )
+            if checks["chunks_without_role_documentaire"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "missing_role_documentaire",
+                        "message": "Some chunks do not have role_documentaire metadata",
+                        "count": checks["chunks_without_role_documentaire"],
+                    },
+                )
+            if checks["chunks_without_pages"]:
+                warnings.append(
+                    f"{checks['chunks_without_pages']} chunks have no page_start/page_end"
+                )
+
+            qdrant_point_count = _qdrant_point_count(index_version["vector_collection"])
+            if qdrant_point_count != chunk_count:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "qdrant_chunk_count_mismatch",
+                        "message": "Qdrant point count does not match PostgreSQL chunks",
+                        "chunk_count": chunk_count,
+                        "qdrant_point_count": qdrant_point_count,
+                    },
+                )
+
+            cur.execute("UPDATE index_versions SET is_active = false")
+            cur.execute(
+                """
+                UPDATE index_versions
+                SET is_active = true
+                WHERE id = %s
+                """,
+                (index_version_id,),
+            )
+
+    return PromoteIndexVersionResponse(
+        index_version_id=index_version_id,
+        is_active=True,
+        vector_collection=index_version["vector_collection"],
+        chunk_count=chunk_count,
+        qdrant_point_count=qdrant_point_count,
+        warnings=warnings,
+    )
 
 
 @router.get("/sources", response_model=SourceListResponse)
@@ -392,11 +620,58 @@ def list_sources(
             rows = cur.fetchall()
 
     return SourceListResponse(
-        items=[SourceSummary(**_without_total_count(row)) for row in rows],
+        items=[_source_from_row(row) for row in rows],
         limit=bounded_limit,
         offset=offset,
         total=_total(rows[0] if rows else None),
     )
+
+
+def _get_source(*, source_id: UUID | None = None, source_code: str | None = None) -> SourceDetail:
+    conditions: list[str] = []
+    params: list[Any] = []
+    if source_id is not None:
+        conditions.append("sources.id = %s")
+        params.append(source_id)
+    if source_code is not None:
+        conditions.append("sources.code = %s")
+        params.append(source_code.strip().lower())
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    sources.id AS source_id,
+                    sources.code AS source_code,
+                    sources.source_type,
+                    sources.origin,
+                    sources.author,
+                    sources.published_at,
+                    COUNT(DISTINCT documents.id)::int AS document_count,
+                    COUNT(DISTINCT document_chunks.id)::int AS chunk_count
+                FROM sources
+                LEFT JOIN documents ON documents.source_id = sources.id
+                LEFT JOIN document_chunks
+                    ON document_chunks.document_id = documents.id
+                WHERE {' AND '.join(conditions)}
+                GROUP BY sources.id
+                """,
+                tuple(params),
+            )
+            row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return SourceDetail(**row)
+
+
+@router.get("/sources/by-code/{source_code}", response_model=SourceDetail)
+def get_source_by_code(source_code: str) -> SourceDetail:
+    return _get_source(source_code=source_code)
+
+
+@router.get("/sources/{source_id}", response_model=SourceDetail)
+def get_source(source_id: UUID) -> SourceDetail:
+    return _get_source(source_id=source_id)
 
 
 @router.get("/documents", response_model=DocumentListResponse)
@@ -724,4 +999,54 @@ def get_run_retrieval_hits(
         limit=bounded_limit,
         offset=offset,
         total=_total(rows[0] if rows else None),
+    )
+
+
+@router.post("/search", response_model=StableSearchResponse)
+async def search_documents(payload: StableSearchRequest) -> StableSearchResponse:
+    try:
+        legacy_response = await documentary_search_documents(
+            DocumentarySearchRequest(
+                query=payload.query,
+                index_version_id=payload.index_version_id,
+                top_k=payload.top_k,
+                rerank_top_k=payload.rerank_top_k,
+                filters=payload.filters,
+            )
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "Index version not found" in message:
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    score_rows = _fetch_retrieval_score_rows(legacy_response.run_id)
+    filters_applied = (
+        payload.filters.active_filters()
+        if payload.filters is not None
+        else {}
+    )
+    hits = []
+    for hit in legacy_response.hits:
+        scores = score_rows.get(hit.chunk_id, {})
+        hits.append(
+            StableSearchHit(
+                chunk_id=hit.chunk_id,
+                document_id=hit.document_id,
+                rank_initial=scores.get("rank_initial"),
+                rank_final=hit.rank,
+                score=hit.score,
+                dense_score=scores.get("dense_score"),
+                lexical_score=scores.get("lexical_score"),
+                rerank_score=scores.get("rerank_score"),
+                content=hit.content,
+                metadata=_safe_metadata(hit.metadata),
+            )
+        )
+
+    return StableSearchResponse(
+        run_id=legacy_response.run_id,
+        index_version_id=payload.index_version_id,
+        filters_applied=filters_applied,
+        hits=hits,
     )

@@ -494,7 +494,7 @@ def _build_metadata_filter_sql(
     return " AND " + " AND ".join(clauses), params
 
 
-@router.post("/sources", response_model=SourceRead)
+@router.post("/sources", response_model=SourceRead, deprecated=True)
 async def create_source(payload: SourceCreate) -> SourceRead:
     raise NotImplementedError
 
