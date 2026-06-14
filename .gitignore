@@ -9,6 +9,7 @@ AGENTS.md
 SESSION.md
 CODEX.md
 AUDIT_METADATA.md
+AUDIT_ENDPOINTS.md
 
 __pycache__/
 *.pyc
