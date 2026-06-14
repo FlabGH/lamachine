@@ -432,7 +432,22 @@ def list_index_versions(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT *, COUNT(*) OVER()::int AS total_count
+                SELECT
+                    id,
+                    name,
+                    embedding_provider,
+                    embedding_model,
+                    embedding_dimension,
+                    vector_collection,
+                    chunking_version,
+                    split_strategy,
+                    chunk_size,
+                    chunk_overlap,
+                    min_chunk_size,
+                    max_chunk_size,
+                    is_active,
+                    created_at,
+                    COUNT(*) OVER()::int AS total_count
                 FROM index_versions
                 ORDER BY created_at DESC, name
                 LIMIT %s OFFSET %s
@@ -457,7 +472,21 @@ def get_active_index_version() -> IndexVersionRead:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT *
+                SELECT
+                    id,
+                    name,
+                    embedding_provider,
+                    embedding_model,
+                    embedding_dimension,
+                    vector_collection,
+                    chunking_version,
+                    split_strategy,
+                    chunk_size,
+                    chunk_overlap,
+                    min_chunk_size,
+                    max_chunk_size,
+                    is_active,
+                    created_at
                 FROM index_versions
                 WHERE is_active IS TRUE
                 ORDER BY created_at DESC
