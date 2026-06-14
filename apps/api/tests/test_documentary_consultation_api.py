@@ -293,6 +293,9 @@ def test_metadata_catalog_exposes_registry_contract():
     )
     assert item.implementation_status == "implemented"
     assert "doctrine_alliee" in item.allowed_values
+    assert item.description == (
+        "Role documentaire de la source dans le corpus et le retrieval."
+    )
     assert item.deprecated is False
     assert not hasattr(item, "storage_path")
 

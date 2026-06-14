@@ -89,6 +89,7 @@ class MetadataRegistryEntry:
     deprecated: bool = False
     alias_of: str | None = None
     qdrant_without_chunk_reason: str | None = None
+    description: str | None = None
 
 
 def _values(values: set[str]) -> tuple[str, ...]:
@@ -113,6 +114,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         retrieval_filterable=True,
         qdrant_required=True,
+        description="Identifiant court et canonique de la source documentaire.",
     ),
     MetadataRegistryEntry(
         "role_documentaire",
@@ -124,6 +126,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         retrieval_filterable=True,
         qdrant_required=True,
+        description="Role documentaire de la source dans le corpus et le retrieval.",
     ),
     MetadataRegistryEntry(
         "famille_politique",
@@ -162,6 +165,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         retrieval_filterable=True,
         implementation_status="partial",
+        description="Nature fonctionnelle du document ingere.",
     ),
     MetadataRegistryEntry(
         "usage_probatoire",
@@ -233,6 +237,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         retrieval_filterable=True,
         qdrant_required=True,
+        description="Tags thematiques libres utiles pour recherche, evaluation et affichage.",
     ),
     MetadataRegistryEntry(
         "data_tags",
@@ -245,6 +250,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         retrieval_filterable=True,
         qdrant_required=True,
+        description="Categories de donnees mobilisees ou necessaires pour le document.",
     ),
     MetadataRegistryEntry(
         "service_family",
@@ -257,6 +263,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         retrieval_filterable=True,
         qdrant_required=True,
+        description="Famille de service LaMachine principalement concernee.",
     ),
     MetadataRegistryEntry(
         "service_ids",
@@ -268,6 +275,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         retrieval_filterable=True,
         qdrant_required=True,
+        description="Identifiants de services LaMachine concernes, par exemple I.1 ou IV.1.",
     ),
     MetadataRegistryEntry(
         "visibility_scope",
@@ -280,6 +288,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         retrieval_filterable=True,
         qdrant_required=True,
+        description="Perimetre de visibilite documentaire prepare pour les silos et droits.",
     ),
     MetadataRegistryEntry(
         "organization_id",
@@ -290,6 +299,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         retrieval_filterable=True,
         qdrant_required=True,
+        description="Identifiant optionnel de l'organisation proprietaire du document.",
     ),
     MetadataRegistryEntry(
         "access_level",
@@ -302,6 +312,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_qdrant=True,
         retrieval_filterable=True,
         qdrant_required=True,
+        description="Niveau d'acces fonctionnel requis pour consulter ou exploiter le document.",
     ),
     MetadataRegistryEntry(
         "source_url",
@@ -352,6 +363,7 @@ METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
         propagate_to_chunk=True,
         propagate_to_qdrant=True,
         retrieval_filterable=True,
+        description="Langue principale du document.",
     ),
     MetadataRegistryEntry(
         "geographic_scope",

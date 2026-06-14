@@ -145,6 +145,37 @@ def test_structural_chunking_metadata_are_registered():
         assert entry.propagate_to_qdrant is True
 
 
+def test_ingestion_metadata_have_ui_descriptions_and_allowed_values():
+    expected_described = {
+        "source_code",
+        "role_documentaire",
+        "type_document",
+        "theme_tags",
+        "data_tags",
+        "service_family",
+        "service_ids",
+        "visibility_scope",
+        "organization_id",
+        "access_level",
+        "language",
+    }
+    expected_controlled = {
+        "role_documentaire",
+        "type_document",
+        "data_tags",
+        "service_family",
+        "visibility_scope",
+        "access_level",
+        "language",
+    }
+
+    for metadata in expected_described:
+        assert METADATA_REGISTRY_BY_NAME[metadata].description
+
+    for metadata in expected_controlled:
+        assert METADATA_REGISTRY_BY_NAME[metadata].allowed_values
+
+
 def test_retrieval_filterable_metadata_status_matches_filter_implementation():
     implemented_filters = {
         "source_code",

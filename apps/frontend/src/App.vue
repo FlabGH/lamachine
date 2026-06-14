@@ -47,6 +47,7 @@ const globalLoading = ref(false);
 const activeIndex = ref(null);
 const indexVersions = ref([]);
 const capabilities = ref(null);
+const metadataCatalog = ref([]);
 const sessionRunIds = ref([]);
 
 const ingestion = reactive({
@@ -61,7 +62,7 @@ const ingestion = reactive({
     role_documentaire: "",
     type_document: "",
     theme_tags: "",
-    data_tags: "",
+    data_tags: ["corpus"],
     service_family: "",
     service_ids: "",
     visibility_scope: "public",
@@ -111,6 +112,20 @@ const implementedFilters = computed(() => {
   return capabilities.value?.implemented_filters ?? [];
 });
 
+const metadataCatalogByName = computed(() => {
+  return Object.fromEntries(
+    metadataCatalog.value.map((item) => [item.metadata, item]),
+  );
+});
+
+const ingestionMetadataFields = computed(() => {
+  return metadataFields.map((field) => ({
+    name: field,
+    catalog: metadataCatalogByName.value[field] ?? null,
+    isList: ["theme_tags", "data_tags", "service_ids"].includes(field),
+  }));
+});
+
 const selectedDocumentId = computed(() => documents.selected?.document_id ?? "");
 
 function setError(error) {
@@ -131,10 +146,17 @@ async function withLoading(task) {
 }
 
 function splitList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
   return String(value || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function metadataHelp(field) {
+  return metadataCatalogByName.value[field]?.description || "";
 }
 
 function buildMetadata() {
@@ -195,6 +217,12 @@ async function loadCapabilities() {
   const data = await withLoading(() => apiGet("/v1/search/capabilities"));
   if (!data) return;
   capabilities.value = data;
+}
+
+async function loadMetadataCatalog() {
+  const data = await withLoading(() => apiGet("/v1/metadata/catalog?level=document"));
+  if (!data) return;
+  metadataCatalog.value = data.items ?? [];
 }
 
 async function submitIngestion() {
@@ -395,6 +423,7 @@ function displayMetadata(metadata) {
 }
 
 onMounted(async () => {
+  await loadMetadataCatalog();
   await loadCapabilities();
   await loadActiveIndex();
   await loadIndexVersions();
@@ -452,8 +481,21 @@ onMounted(async () => {
           <input v-model="ingestion.title" type="text" placeholder="Titre document" />
         </label>
         <label>
-          source_code
-          <input v-model="ingestion.source_code" type="text" placeholder="ps" />
+          <span class="field-label">
+            source_code
+            <span
+              v-if="metadataHelp('source_code')"
+              class="help-dot"
+              :title="metadataHelp('source_code')"
+            >?</span>
+          </span>
+          <input
+            v-model="ingestion.source_code"
+            type="text"
+            placeholder="ps"
+            :title="metadataHelp('source_code')"
+          />
+          <small v-if="metadataHelp('source_code')">{{ metadataHelp("source_code") }}</small>
         </label>
         <label>
           Origin
@@ -476,13 +518,51 @@ onMounted(async () => {
 
       <h3>Metadata minimales</h3>
       <div class="form-grid">
-        <label v-for="field in metadataFields" :key="field">
-          {{ field }}
+        <label v-for="field in ingestionMetadataFields" :key="field.name">
+          <span class="field-label">
+            {{ field.name }}
+            <span
+              v-if="field.catalog?.description"
+              class="help-dot"
+              :title="field.catalog.description"
+            >?</span>
+          </span>
+          <select
+            v-if="field.catalog?.allowed_values && field.isList"
+            v-model="ingestion.metadata[field.name]"
+            multiple
+            :title="field.catalog.description"
+          >
+            <option
+              v-for="value in field.catalog.allowed_values"
+              :key="value"
+              :value="value"
+            >
+              {{ value }}
+            </option>
+          </select>
+          <select
+            v-else-if="field.catalog?.allowed_values"
+            v-model="ingestion.metadata[field.name]"
+            :title="field.catalog.description"
+          >
+            <option value="">Non renseigne</option>
+            <option
+              v-for="value in field.catalog.allowed_values"
+              :key="value"
+              :value="value"
+            >
+              {{ value }}
+            </option>
+          </select>
           <input
-            v-model="ingestion.metadata[field]"
+            v-else
+            v-model="ingestion.metadata[field.name]"
             type="text"
-            :placeholder="['theme_tags', 'data_tags', 'service_ids'].includes(field) ? 'valeurs separees par virgules' : field"
+            :title="field.catalog?.description"
+            :placeholder="field.isList ? 'valeurs separees par virgules' : field.name"
           />
+          <small v-if="field.catalog?.description">{{ field.catalog.description }}</small>
         </label>
       </div>
 
@@ -892,6 +972,29 @@ label {
   gap: 6px;
   color: #33423b;
   font-size: 14px;
+}
+
+small {
+  color: #68776f;
+  line-height: 1.35;
+}
+
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.help-dot {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid #aab8b1;
+  border-radius: 50%;
+  color: #52625b;
+  font-size: 12px;
+  line-height: 1;
 }
 
 .full-field {

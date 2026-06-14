@@ -268,7 +268,7 @@ def _entry_to_catalog_item(entry) -> MetadataCatalogItem:
     return MetadataCatalogItem(
         metadata=entry.metadata,
         level=entry.level,
-        description=_metadata_description(entry.metadata),
+        description=entry.description or _metadata_description(entry.metadata),
         uses=list(entry.uses),
         implementation_status=entry.implementation_status,
         allowed_values=list(entry.allowed_values) if entry.allowed_values else None,
