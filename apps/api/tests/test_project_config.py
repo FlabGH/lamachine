@@ -1,0 +1,95 @@
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from app.api.project import get_project_config_endpoint
+from app.services import project_config
+from app.services.project_config import (
+    load_project_config,
+    project_trace_payload,
+)
+from main import app
+
+
+def test_project_config_loads_default_contract():
+    config = load_project_config()
+
+    assert config.project_id == "lapythie-core"
+    assert config.project_name == "LaPythie"
+    assert config.config_version == 1
+    assert config.documentary.metadata_registry == "python_registry_v1"
+    assert config.documentary.chunking_strategy == "index_version_runtime"
+    assert config.documentary.retrieval_preset == "hybrid_dense_lexical_rerank_v1"
+
+
+def test_project_config_path_can_be_overridden(monkeypatch, tmp_path):
+    config_path = tmp_path / "project.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "project_id: corpus-controle",
+                "project_name: CorpusControle",
+                "config_version: 2",
+                "documentary:",
+                "  metadata_registry: registry_v2",
+                "  chunking_strategy: section_aware_window_v1",
+                "  retrieval_preset: control_hybrid_v1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PROJECT_CONFIG_PATH", str(config_path))
+    project_config.get_project_config.cache_clear()
+
+    config = project_config.get_project_config()
+
+    assert config.project_id == "corpus-controle"
+    assert config.project_name == "CorpusControle"
+    assert config.config_version == 2
+    assert config.documentary.retrieval_preset == "control_hybrid_v1"
+
+
+def test_project_config_endpoint_returns_loaded_config(monkeypatch):
+    monkeypatch.delenv("PROJECT_CONFIG_PATH", raising=False)
+    project_config.get_project_config.cache_clear()
+
+    assert get_project_config_endpoint() == project_config.get_project_config()
+
+
+def test_project_config_api_endpoint_is_exposed(monkeypatch):
+    monkeypatch.delenv("PROJECT_CONFIG_PATH", raising=False)
+    project_config.get_project_config.cache_clear()
+
+    response = TestClient(app).get("/api/project/config")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "project_id": "lapythie-core",
+        "project_name": "LaPythie",
+        "config_version": 1,
+        "documentary": {
+            "metadata_registry": "python_registry_v1",
+            "chunking_strategy": "index_version_runtime",
+            "retrieval_preset": "hybrid_dense_lexical_rerank_v1",
+        },
+    }
+
+
+def test_project_trace_payload_contains_identity_only(monkeypatch):
+    monkeypatch.delenv("PROJECT_CONFIG_PATH", raising=False)
+    project_config.get_project_config.cache_clear()
+
+    assert project_trace_payload() == {
+        "project_id": "lapythie-core",
+        "project_name": "LaPythie",
+        "config_version": 1,
+    }
+
+
+def test_project_config_path_relative_to_api_root(monkeypatch):
+    monkeypatch.setenv("PROJECT_CONFIG_PATH", "config/project.yaml")
+    project_config.get_project_config.cache_clear()
+
+    assert project_config.get_project_config() == load_project_config(
+        Path(project_config.API_ROOT) / "config" / "project.yaml"
+    )

@@ -55,6 +55,7 @@ from app.services.ai.clients import RerankCandidate
 from app.services.documentary.vector_store import search_chunks
 
 from app.services.ai.clients import LLMMessage
+from app.services.project_config import project_trace_payload
 
 router = APIRouter(prefix="/documentary", tags=["documentary"])
 
@@ -660,6 +661,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     payload.index_version_id,
                     json.dumps(
                         {
+                            "project": project_trace_payload(),
                             "document_id": str(payload.document_id),
                             "index_version_id": str(payload.index_version_id),
                             "ai_backend_preset": ai_backend_preset,
@@ -913,6 +915,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                 (
                     json.dumps(
                         {
+                            "project": project_trace_payload(),
                             "chunks_created": len(inserted_chunks),
                             "chunks_inserted": len(inserted_chunks),
                             "chunks_skipped_duplicate": chunks_skipped_duplicate,
@@ -1041,6 +1044,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                     payload.index_version_id,
                     json.dumps(
                         {
+                            "project": project_trace_payload(),
                             "query": payload.query,
                             "top_k": payload.top_k,
                             "rerank_top_k": payload.rerank_top_k,
@@ -1194,6 +1198,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                     (
                         json.dumps(
                             {
+                                "project": project_trace_payload(),
                                 "hits": 0,
                                 "top_k": payload.top_k,
                                 "rerank_top_k": payload.rerank_top_k,
@@ -1360,6 +1365,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                 (
                     json.dumps(
                         {
+                            "project": project_trace_payload(),
                             "hits": len(final_hits),
                             "top_k": payload.top_k,
                             "rerank_top_k": payload.rerank_top_k,
@@ -1468,6 +1474,7 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                     payload.index_version_id,
                     json.dumps(
                         {
+                            "project": project_trace_payload(),
                             "query": payload.query,
                             "personas": [p.value for p in payload.personas],
                             "retrieval_run_id": str(search_response.run_id),
@@ -1481,6 +1488,7 @@ async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
                     ),
                     json.dumps(
                         {
+                            "project": project_trace_payload(),
                             "outputs": len(payload.personas),
                             "retrieval_run_id": str(search_response.run_id),
                             "prompt_version": payload.prompt_version,
@@ -1711,6 +1719,7 @@ async def ingest_pdf(
                     "succeeded",
                     json.dumps(
                         {
+                            "project": project_trace_payload(),
                             "filename": file.filename,
                             "source_code": normalized_source_code,
                             "extraction_status": extraction.status,
@@ -1719,6 +1728,7 @@ async def ingest_pdf(
                     ),
                     json.dumps(
                         {
+                            "project": project_trace_payload(),
                             "document_id": str(document_id),
                             "extraction": document_metadata["extraction"],
                         }
@@ -1824,12 +1834,18 @@ async def ingest_text(
                     "succeeded",
                     json.dumps(
                         {
+                            "project": project_trace_payload(),
                             "title": title,
                             "source_code": normalized_source_code,
                             "metadata": document_metadata,
                         }
                     ),
-                    json.dumps({"document_id": str(document_id)}),
+                    json.dumps(
+                        {
+                            "project": project_trace_payload(),
+                            "document_id": str(document_id),
+                        }
+                    ),
                 ),
             )
             run_id = cur.fetchone()["id"]
