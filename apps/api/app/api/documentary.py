@@ -4,11 +4,12 @@ import hashlib
 import os
 import re
 from enum import Enum
+from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from qdrant_client.models import FieldCondition, Filter, MatchAny
 
 import json
@@ -27,12 +28,6 @@ from app.services.documentary.chunking import (
     deduplicate_chunks,
 )
 from app.services.documentary.metadata_contract import (
-    ACCESS_LEVEL_VALUES,
-    DATA_TAG_VALUES,
-    LANGUAGE_VALUES,
-    ROLE_DOCUMENTAIRE_VALUES,
-    SERVICE_FAMILY_VALUES,
-    VISIBILITY_SCOPE_VALUES,
     build_canonical_chunk_metadata,
 )
 from app.services.documentary.metadata_registry import (
@@ -44,6 +39,7 @@ from app.services.documentary.metadata_validation import (
     build_qdrant_payload,
     propagate_document_metadata,
     validate_metadata,
+    validate_retrieval_filters,
 )
 
 from app.services.ai.factory import (
@@ -120,38 +116,6 @@ concat_ws(
     replace(COALESCE(metadata->>'theme_tags', ''), '_', ' ')
 )
 """
-SEARCH_FILTER_ARRAY_FIELDS = {"theme_tags", "data_tags", "service_ids"}
-SEARCH_FILTER_ALLOWED_VALUES = {
-    "role_documentaire": ROLE_DOCUMENTAIRE_VALUES,
-    "data_tags": DATA_TAG_VALUES,
-    "service_family": SERVICE_FAMILY_VALUES,
-    "visibility_scope": VISIBILITY_SCOPE_VALUES,
-    "access_level": ACCESS_LEVEL_VALUES,
-    "language": LANGUAGE_VALUES,
-}
-SEARCH_FILTER_LOWERCASE_FIELDS = {
-    "source_code",
-    "role_documentaire",
-    "theme_tags",
-    "data_tags",
-    "service_family",
-    "visibility_scope",
-    "organization_id",
-    "access_level",
-    "language",
-}
-SEARCH_FILTER_FIELDS = {
-    "source_code",
-    "role_documentaire",
-    "theme_tags",
-    "data_tags",
-    "service_family",
-    "service_ids",
-    "visibility_scope",
-    "organization_id",
-    "access_level",
-    "language",
-}
 
 
 def _significant_lexical_terms(query: str) -> list[str]:
@@ -208,43 +172,6 @@ def _adapter_response_metadata(client, raw: dict | None = None) -> dict:
     if raw:
         metadata.update(raw)
     return metadata
-
-
-def _normalize_filter_values(field_name: str, value: list[str] | None) -> list[str] | None:
-    if value is None:
-        return None
-
-    normalized_values: list[str] = []
-    seen: set[str] = set()
-    for item in value:
-        if not isinstance(item, str):
-            raise ValueError(f"{field_name} filter values must be strings")
-        normalized = item.strip()
-        if field_name in SEARCH_FILTER_LOWERCASE_FIELDS:
-            normalized = normalized.lower()
-        if not normalized:
-            continue
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        normalized_values.append(normalized)
-
-    if not normalized_values:
-        raise ValueError(f"{field_name} filter must contain at least one value")
-
-    allowed_values = SEARCH_FILTER_ALLOWED_VALUES.get(field_name)
-    if allowed_values is not None:
-        invalid_values = [
-            item for item in normalized_values
-            if item not in allowed_values
-        ]
-        if invalid_values:
-            raise ValueError(
-                f"Invalid {field_name} filter values: {', '.join(invalid_values)}. "
-                f"Allowed values: {', '.join(sorted(allowed_values))}"
-            )
-
-    return normalized_values
 
 
 class RunStatus(str, Enum):
@@ -366,41 +293,10 @@ class RunRead(BaseModel):
 
 
 class SearchMetadataFilters(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
-    source_code: list[str] | None = None
-    role_documentaire: list[str] | None = None
-    theme_tags: list[str] | None = None
-    data_tags: list[str] | None = None
-    service_family: list[str] | None = None
-    service_ids: list[str] | None = None
-    visibility_scope: list[str] | None = None
-    organization_id: list[str] | None = None
-    access_level: list[str] | None = None
-    language: list[str] | None = None
-
-    @field_validator(
-        "source_code",
-        "role_documentaire",
-        "theme_tags",
-        "data_tags",
-        "service_family",
-        "service_ids",
-        "visibility_scope",
-        "organization_id",
-        "access_level",
-        "language",
-    )
-    @classmethod
-    def normalize_filter_values(
-        cls,
-        value: list[str] | None,
-        info,
-    ) -> list[str] | None:
-        return _normalize_filter_values(info.field_name, value)
-
-    def active_filters(self) -> dict[str, list[str]]:
-        return self.model_dump(exclude_none=True)
+    def active_filters(self) -> dict[str, list[Any]]:
+        return dict(self.model_extra or {})
 
 
 class SearchRequest(BaseModel):
@@ -456,17 +352,41 @@ class GenerateNoteResponse(BaseModel):
     outputs: list[OutputRead]
 
 
-def _search_filter_payload(filters: SearchMetadataFilters | None) -> dict[str, list[str]]:
+def _search_filter_payload(filters: SearchMetadataFilters | None) -> dict[str, list[Any]]:
     if filters is None:
         return {}
     return filters.active_filters()
 
 
-def _build_qdrant_search_filter(
+def _validate_search_filters_or_422(
     filters: SearchMetadataFilters | None,
+) -> dict[str, list[Any]]:
+    try:
+        return validate_retrieval_filters(
+            _search_filter_payload(filters),
+            registry=get_metadata_registry(),
+        )
+    except MetadataValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_metadata_filters",
+                "issues": [
+                    {
+                        "code": issue.code,
+                        "field": issue.field,
+                        "message": issue.message,
+                    }
+                    for issue in exc.issues
+                ],
+            },
+        ) from exc
+
+
+def _build_qdrant_search_filter(
+    filters: dict[str, list[Any]],
 ) -> Filter | None:
-    active_filters = _search_filter_payload(filters)
-    if not active_filters:
+    if not filters:
         return None
 
     return Filter(
@@ -475,30 +395,33 @@ def _build_qdrant_search_filter(
                 key=field,
                 match=MatchAny(any=values),
             )
-            for field, values in active_filters.items()
+            for field, values in filters.items()
         ],
     )
 
 
 def _build_metadata_filter_sql(
-    filters: SearchMetadataFilters | None,
+    filters: dict[str, list[Any]],
     *,
     metadata_expression: str = "metadata",
-) -> tuple[str, list[list[str]]]:
-    active_filters = _search_filter_payload(filters)
-    if not active_filters:
+    registry,
+) -> tuple[str, list[Any]]:
+    if not filters:
         return "", []
 
     clauses: list[str] = []
-    params: list[list[str]] = []
-    for field, values in active_filters.items():
-        if field not in SEARCH_FILTER_FIELDS:
-            raise ValueError(f"Unsupported search metadata filter: {field}")
-        if field in SEARCH_FILTER_ARRAY_FIELDS:
-            clauses.append(f"({metadata_expression}->'{field}') ?| %s")
+    params: list[Any] = []
+    for field, values in filters.items():
+        field_definition = registry.fields[field]
+        if field_definition.type.value == "list":
+            clauses.append(f"({metadata_expression}->%s) ?| %s")
+            params.extend([field, values])
         else:
-            clauses.append(f"({metadata_expression}->>'{field}') = ANY(%s)")
-        params.append(values)
+            value_clauses = [
+                f"{metadata_expression} @> %s::jsonb" for _ in values
+            ]
+            clauses.append("(" + " OR ".join(value_clauses) + ")")
+            params.extend(json.dumps({field: value}) for value in values)
 
     return " AND " + " AND ".join(clauses), params
 
@@ -1058,14 +981,16 @@ async def preview_document_chunking(
 
 @router.post("/search", response_model=SearchResponse)
 async def search_documents(payload: SearchRequest) -> SearchResponse:
+    search_filters = _validate_search_filters_or_422(payload.filters)
+    registry = get_metadata_registry()
     embedding_client = get_embedding_client()
     reranker = get_reranker_client()
     ai_backend_preset = get_ai_backend_preset_name()
-    search_filters = _search_filter_payload(payload.filters)
-    qdrant_filter = _build_qdrant_search_filter(payload.filters)
+    qdrant_filter = _build_qdrant_search_filter(search_filters)
     lexical_filter_sql, lexical_filter_params = _build_metadata_filter_sql(
-        payload.filters,
+        search_filters,
         metadata_expression="metadata",
+        registry=registry,
     )
 
     with get_connection() as conn:

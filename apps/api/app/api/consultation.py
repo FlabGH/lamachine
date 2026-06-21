@@ -34,9 +34,6 @@ SENSITIVE_TRACE_KEYS = {
     "raw",
     "raw_response",
 }
-LIST_SEARCH_FILTERS = {"theme_tags", "data_tags"}
-
-
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -385,7 +382,11 @@ def get_search_capabilities() -> SearchCapabilitiesResponse:
         filter_semantics=SearchFilterSemantics(
             between_fields="AND",
             within_field_values="OR",
-            list_fields=sorted(LIST_SEARCH_FILTERS),
+            list_fields=sorted(
+                name
+                for name, entry in registry.fields.items()
+                if entry.retrieval_filterable and entry.type.value == "list"
+            ),
             invalid_filters="rejected",
         ),
         implemented_filters=implemented,
