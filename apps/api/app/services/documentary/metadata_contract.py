@@ -644,14 +644,3 @@ def build_qdrant_payload(
         "chunk_id": str(chunk_id),
         **chunk_metadata,
     }
-
-
-def build_canonical_qdrant_payload(
-    *,
-    chunk_id: Any,
-    chunk_metadata: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "chunk_id": str(chunk_id),
-        **chunk_metadata,
-    }

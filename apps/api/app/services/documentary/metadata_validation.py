@@ -81,6 +81,7 @@ def validate_metadata(
     *,
     scope: MetadataScope,
     registry: MetadataRegistry,
+    required_field_names: set[str] | None = None,
 ) -> dict[str, Any]:
     """Validate documentary metadata against the effective registry."""
     issues: list[MetadataValidationIssue] = []
@@ -161,8 +162,15 @@ def validate_metadata(
                     )
                 )
 
-    for name, field in registry.fields.items():
-        if scope in field.scopes and field.required and name not in metadata:
+    required_names = required_field_names
+    if required_names is None:
+        required_names = {
+            name
+            for name, field in registry.fields.items()
+            if scope in field.scopes and field.required
+        }
+    for name in required_names:
+        if name not in metadata:
             issues.append(
                 MetadataValidationIssue(
                     code="required_field_missing",
@@ -174,6 +182,55 @@ def validate_metadata(
     if issues:
         raise MetadataValidationError(issues)
     return dict(metadata)
+
+
+def validate_qdrant_payload(
+    payload: dict[str, Any],
+    *,
+    registry: MetadataRegistry,
+) -> dict[str, Any]:
+    issues = [
+        MetadataValidationIssue(
+            code="qdrant_field_not_allowed",
+            field=name,
+            message="Field does not propagate to Qdrant",
+        )
+        for name in payload
+        if (field := registry.fields.get(name)) is not None
+        and not field.propagate_to_qdrant
+    ]
+    if issues:
+        raise MetadataValidationError(issues)
+
+    required_names = {
+        name
+        for name, field in registry.fields.items()
+        if field.qdrant_required
+    }
+    return validate_metadata(
+        payload,
+        scope=MetadataScope.chunk,
+        registry=registry,
+        required_field_names=required_names,
+    )
+
+
+def build_qdrant_payload(
+    chunk_metadata: dict[str, Any],
+    *,
+    registry: MetadataRegistry,
+) -> dict[str, Any]:
+    validate_metadata(
+        chunk_metadata,
+        scope=MetadataScope.chunk,
+        registry=registry,
+    )
+    payload = {
+        name: deepcopy(value)
+        for name, value in chunk_metadata.items()
+        if registry.fields[name].propagate_to_qdrant
+    }
+    return validate_qdrant_payload(payload, registry=registry)
 
 
 def propagate_document_metadata(

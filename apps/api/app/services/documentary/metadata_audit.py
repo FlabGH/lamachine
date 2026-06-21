@@ -15,6 +15,7 @@ from app.services.documentary.metadata_registry import (
 )
 from app.services.documentary.metadata_validation import (
     MetadataValidationError,
+    validate_qdrant_payload,
     validate_metadata,
 )
 
@@ -56,7 +57,10 @@ def audit_metadata(
 ) -> MetadataAuditReport:
     issues: list[MetadataAuditIssue] = []
     try:
-        validate_metadata(metadata, scope=scope, registry=registry)
+        if qdrant_payload and scope is MetadataScope.chunk:
+            validate_qdrant_payload(metadata, registry=registry)
+        else:
+            validate_metadata(metadata, scope=scope, registry=registry)
     except MetadataValidationError as exc:
         issues.extend(
             MetadataAuditIssue(
@@ -66,17 +70,6 @@ def audit_metadata(
             )
             for issue in exc.issues
         )
-    if qdrant_payload and scope is MetadataScope.chunk:
-        for name, field in registry.fields.items():
-            if field.qdrant_required and name not in metadata:
-                issues.append(
-                    MetadataAuditIssue(
-                        code="qdrant_required_field_missing",
-                        field=name,
-                        message="Qdrant-required field is missing",
-                    )
-                )
-
     return MetadataAuditReport(
         scope=scope,
         qdrant_payload=qdrant_payload,

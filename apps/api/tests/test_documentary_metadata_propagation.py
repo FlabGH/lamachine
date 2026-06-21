@@ -247,7 +247,13 @@ def test_metadata_propagates_from_document_to_chunks_qdrant_and_search_hits(
         assert metadata["page_start"] == 2
         assert metadata["page_end"] == 2
         assert metadata["content_hash"]
+
+    for metadata in (chunk_metadata, hit_metadata):
         assert metadata["chunking_strategy"] == "word_window"
+
+    assert "chunking_strategy" not in qdrant_payload
+    assert "chunk_index" not in qdrant_payload
+    assert "token_count" not in qdrant_payload
 
     assert qdrant_payload["chunk_id"] == str(CHUNK_ID)
     assert search_response.hits[0].chunk_id == CHUNK_ID
@@ -350,4 +356,42 @@ def test_indexing_rejects_unknown_chunk_metadata_before_deleting_chunks(monkeypa
             )
         )
 
+    assert not any("DELETE FROM document_chunks" in query for query, _ in state["queries"])
+
+
+def test_indexing_rejects_document_chunk_propagation_conflict(monkeypatch):
+    state = {
+        "queries": [],
+        "chunk_rows": {},
+        "qdrant_points": [],
+    }
+    conflicting_chunk = SimpleNamespace(
+        chunk_index=0,
+        content="Chunk conflictuel",
+        content_sha256="conflicting-chunk-hash",
+        page_start=None,
+        page_end=None,
+        token_count=2,
+        metadata={"source_code": "other_source"},
+    )
+
+    monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection(state))
+    monkeypatch.setattr(documentary, "get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr(
+        documentary,
+        "chunk_text",
+        lambda *args, **kwargs: [conflicting_chunk],
+    )
+
+    with pytest.raises(MetadataValidationError, match="source_code") as exc_info:
+        asyncio.run(
+            documentary.index_document(
+                documentary.IndexRequest(
+                    document_id=DOCUMENT_ID,
+                    index_version_id=INDEX_VERSION_ID,
+                )
+            )
+        )
+
+    assert exc_info.value.issues[0].code == "propagation_conflict"
     assert not any("DELETE FROM document_chunks" in query for query, _ in state["queries"])
