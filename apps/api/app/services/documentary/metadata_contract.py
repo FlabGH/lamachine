@@ -567,6 +567,52 @@ def build_chunk_metadata(
     return metadata
 
 
+def build_canonical_chunk_metadata(
+    *,
+    source_id: Any,
+    document_id: Any,
+    chunk_id: Any,
+    title: str,
+    source_code: str,
+    content_hash: str,
+    index_version: Any,
+    vector_collection: str,
+    chunk_index: int,
+    token_count: int,
+    chunking_version: str,
+    chunking_strategy: str,
+    chunk_size: int,
+    chunk_overlap: int,
+    parent_document_id: Any | None = None,
+    page_start: int | None = None,
+    page_end: int | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = {
+        **(extra or {}),
+        "source_id": str(source_id),
+        "document_id": str(document_id),
+        "parent_document_id": str(parent_document_id or document_id),
+        "chunk_id": str(chunk_id),
+        "title": title,
+        "source_code": source_code,
+        "content_hash": content_hash,
+        "index_version": str(index_version),
+        "vector_collection": vector_collection,
+        "chunk_index": chunk_index,
+        "token_count": token_count,
+        "chunking_version": chunking_version,
+        "chunking_strategy": chunking_strategy,
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
+    }
+    if page_start is not None:
+        metadata["page_start"] = page_start
+    if page_end is not None:
+        metadata["page_end"] = page_end
+    return metadata
+
+
 def missing_chunk_metadata_keys(metadata: dict[str, Any]) -> list[str]:
     missing = [
         key
@@ -594,6 +640,17 @@ def build_qdrant_payload(
     chunk_metadata: dict[str, Any],
 ) -> dict[str, Any]:
     validate_chunk_metadata(chunk_metadata)
+    return {
+        "chunk_id": str(chunk_id),
+        **chunk_metadata,
+    }
+
+
+def build_canonical_qdrant_payload(
+    *,
+    chunk_id: Any,
+    chunk_metadata: dict[str, Any],
+) -> dict[str, Any]:
     return {
         "chunk_id": str(chunk_id),
         **chunk_metadata,

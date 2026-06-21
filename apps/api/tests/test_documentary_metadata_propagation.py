@@ -3,8 +3,11 @@ import json
 from types import SimpleNamespace
 from uuid import UUID
 
+import pytest
+
 from app.api import documentary
 from app.services.ai.clients import EmbeddingResult, RerankResult
+from app.services.documentary.metadata_validation import MetadataValidationError
 
 
 SOURCE_ID = UUID("00000000-0000-0000-0000-000000000101")
@@ -19,10 +22,11 @@ CHUNK_ID = UUID("00000000-0000-0000-0000-000000000107")
 DOCUMENT_METADATA = {
     "title": "Document metadata",
     "source_code": "metadata_source",
+    "source_id": str(SOURCE_ID),
+    "document_id": str(DOCUMENT_ID),
+    "mime_type": "text/plain",
     "data_tags": ["interne", "juridique"],
-    "service_family": "debat",
-    "service_ids": ["I.1", "IV.1"],
-    "visibility_scope": "organisation",
+    "visibility_scope": "organization",
     "organization_id": "org-test",
     "access_level": "restricted",
     "source_url": "https://example.test/document",
@@ -35,8 +39,6 @@ DOCUMENT_METADATA = {
     "is_primary_source": True,
     "citation_policy": "citable",
     "rights_status": "internal",
-    "extraction": {"status": "success"},
-    "extracted_pages": [{"page": 2, "text": "Texte extrait"}],
 }
 
 
@@ -125,7 +127,7 @@ class FakeCursor:
             self.state["chunk_rows"][str(CHUNK_ID)] = {
                 "id": CHUNK_ID,
                 "document_id": DOCUMENT_ID,
-                "content": params[3],
+                "content": params[4],
                 "metadata": metadata,
             }
             self._result = {"id": CHUNK_ID}
@@ -182,6 +184,7 @@ def test_metadata_propagates_from_document_to_chunks_qdrant_and_search_hits(
     monkeypatch.setattr(documentary, "get_ai_backend_preset_name", lambda: "test")
     monkeypatch.setattr(documentary, "get_qdrant_client", lambda: object())
     monkeypatch.setattr(documentary, "ensure_collection", lambda *args, **kwargs: None)
+    monkeypatch.setattr(documentary, "uuid4", lambda: CHUNK_ID)
 
     def fake_upsert_chunks(client, *, collection_name, points):
         state["qdrant_points"].extend(points)
@@ -231,9 +234,7 @@ def test_metadata_propagates_from_document_to_chunks_qdrant_and_search_hits(
     for metadata in (chunk_metadata, qdrant_payload, hit_metadata):
         assert metadata["source_code"] == "metadata_source"
         assert metadata["data_tags"] == ["interne", "juridique"]
-        assert metadata["service_family"] == "debat"
-        assert metadata["service_ids"] == ["I.1", "IV.1"]
-        assert metadata["visibility_scope"] == "organisation"
+        assert metadata["visibility_scope"] == "organization"
         assert metadata["organization_id"] == "org-test"
         assert metadata["access_level"] == "restricted"
         assert metadata["source_url"] == "https://example.test/document"
@@ -245,8 +246,8 @@ def test_metadata_propagates_from_document_to_chunks_qdrant_and_search_hits(
         assert metadata["rights_status"] == "internal"
         assert metadata["page_start"] == 2
         assert metadata["page_end"] == 2
-        assert "extraction" not in metadata
-        assert "extracted_pages" not in metadata
+        assert metadata["content_hash"]
+        assert metadata["chunking_strategy"] == "word_window"
 
     assert qdrant_payload["chunk_id"] == str(CHUNK_ID)
     assert search_response.hits[0].chunk_id == CHUNK_ID
@@ -266,6 +267,7 @@ def test_metadata_filter_restricts_dense_candidates(monkeypatch):
     monkeypatch.setattr(documentary, "get_ai_backend_preset_name", lambda: "test")
     monkeypatch.setattr(documentary, "get_qdrant_client", lambda: object())
     monkeypatch.setattr(documentary, "ensure_collection", lambda *args, **kwargs: None)
+    monkeypatch.setattr(documentary, "uuid4", lambda: CHUNK_ID)
 
     def fake_upsert_chunks(client, *, collection_name, points):
         state["qdrant_points"].extend(points)
@@ -316,3 +318,36 @@ def test_metadata_filter_restricts_dense_candidates(monkeypatch):
     assert search_response.hits == []
     assert state["query_filter"].must[0].key == "source_code"
     assert state["query_filter"].must[0].match.any == ["other_source"]
+
+
+def test_indexing_rejects_unknown_chunk_metadata_before_deleting_chunks(monkeypatch):
+    state = {
+        "queries": [],
+        "chunk_rows": {},
+        "qdrant_points": [],
+    }
+    invalid_chunk = SimpleNamespace(
+        chunk_index=0,
+        content="Chunk invalide",
+        content_sha256="invalid-chunk-hash",
+        page_start=None,
+        page_end=None,
+        token_count=2,
+        metadata={"unknown_chunk_field": "value"},
+    )
+
+    monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection(state))
+    monkeypatch.setattr(documentary, "get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr(documentary, "chunk_text", lambda *args, **kwargs: [invalid_chunk])
+
+    with pytest.raises(MetadataValidationError, match="unknown_chunk_field"):
+        asyncio.run(
+            documentary.index_document(
+                documentary.IndexRequest(
+                    document_id=DOCUMENT_ID,
+                    index_version_id=INDEX_VERSION_ID,
+                )
+            )
+        )
+
+    assert not any("DELETE FROM document_chunks" in query for query, _ in state["queries"])

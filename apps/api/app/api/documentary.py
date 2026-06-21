@@ -4,7 +4,7 @@ import hashlib
 import os
 import re
 from enum import Enum
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
@@ -33,9 +33,16 @@ from app.services.documentary.metadata_contract import (
     ROLE_DOCUMENTAIRE_VALUES,
     SERVICE_FAMILY_VALUES,
     VISIBILITY_SCOPE_VALUES,
-    build_chunk_metadata,
-    build_qdrant_payload,
-    normalize_ingestion_metadata,
+    build_canonical_chunk_metadata,
+    build_canonical_qdrant_payload,
+)
+from app.services.documentary.metadata_registry import (
+    MetadataScope,
+    get_metadata_registry,
+)
+from app.services.documentary.metadata_validation import (
+    MetadataValidationError,
+    validate_metadata,
 )
 
 from app.services.ai.factory import (
@@ -503,10 +510,15 @@ async def create_source(payload: SourceCreate) -> SourceRead:
 def _chunk_document_metadata(document_metadata: dict | None) -> dict:
     if not document_metadata:
         return {}
+    registry = get_metadata_registry()
     return {
         key: value
         for key, value in document_metadata.items()
-        if key not in {"extraction", "extracted_pages"}
+        if (
+            (field := registry.fields.get(key)) is not None
+            and MetadataScope.chunk in field.scopes
+            and field.propagate_to_chunks
+        )
     }
 
 
@@ -541,15 +553,55 @@ def _normalize_ingestion_metadata_or_400(
     *,
     title: str,
     source_code: str,
+    mime_type: str,
+    filename: str | None,
+    author: str | None,
+    source_id: UUID,
+    document_id: UUID,
 ) -> dict:
     parsed = _parse_ingestion_metadata_json(metadata_json)
-    try:
-        return normalize_ingestion_metadata(
-            parsed,
-            title=title,
-            source_code=source_code,
+    controlled_fields = {
+        "title",
+        "source_code",
+        "mime_type",
+        "filename",
+        "author",
+        "source_id",
+        "document_id",
+    }
+    conflicts = sorted(controlled_fields.intersection(parsed))
+    if conflicts:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata",
+                "message": (
+                    "metadata_json must not override server-controlled fields: "
+                    f"{', '.join(conflicts)}"
+                ),
+            },
         )
-    except ValueError as exc:
+
+    metadata = {
+        **parsed,
+        "title": title.strip(),
+        "source_code": source_code.strip().lower(),
+        "mime_type": mime_type.strip(),
+        "source_id": str(source_id),
+        "document_id": str(document_id),
+    }
+    if isinstance(filename, str):
+        metadata["filename"] = filename.strip()
+    if isinstance(author, str):
+        metadata["author"] = author.strip()
+
+    try:
+        return validate_metadata(
+            metadata,
+            scope=MetadataScope.document,
+            registry=get_metadata_registry(),
+        )
+    except MetadataValidationError as exc:
         raise HTTPException(
             status_code=400,
             detail={
@@ -636,9 +688,53 @@ async def index_document(payload: IndexRequest) -> RunRead:
 
             raw_text = document["raw_text"] or ""
             chunking_config = _chunking_config_from_index_version(index_version)
+            registry = get_metadata_registry()
+            validate_metadata(
+                document["document_metadata"] or {},
+                scope=MetadataScope.document,
+                registry=registry,
+            )
             candidate_chunks = chunk_text(raw_text, config=chunking_config)
             chunks = deduplicate_chunks(candidate_chunks)
             chunks_skipped_duplicate = len(candidate_chunks) - len(chunks)
+
+            document_chunk_metadata = _chunk_document_metadata(
+                document["document_metadata"]
+            )
+            prepared_chunks = []
+            for chunk in chunks:
+                chunk_id = uuid4()
+                chunk_metadata = build_canonical_chunk_metadata(
+                    source_id=document["source_id"],
+                    document_id=payload.document_id,
+                    chunk_id=chunk_id,
+                    title=document["document_title"],
+                    source_code=document["source_code"],
+                    content_hash=chunk.content_sha256,
+                    index_version=payload.index_version_id,
+                    vector_collection=index_version["vector_collection"],
+                    chunk_index=chunk.chunk_index,
+                    token_count=chunk.token_count,
+                    chunking_version=chunking_config.chunking_version,
+                    chunking_strategy=chunking_config.split_strategy,
+                    chunk_size=chunking_config.chunk_size,
+                    chunk_overlap=chunking_config.chunk_overlap,
+                    page_start=chunk.page_start,
+                    page_end=chunk.page_end,
+                    extra={
+                        **document_chunk_metadata,
+                        **chunk.metadata,
+                        "embedding_provider": embedding_client.provider,
+                        "embedding_model": embedding_client.model,
+                        "embedding_dimension": embedding_client.dimension,
+                    },
+                )
+                validate_metadata(
+                    chunk_metadata,
+                    scope=MetadataScope.chunk,
+                    registry=registry,
+                )
+                prepared_chunks.append((chunk_id, chunk, chunk_metadata))
 
             cur.execute(
                 """
@@ -722,31 +818,11 @@ async def index_document(payload: IndexRequest) -> RunRead:
 
             inserted_chunks = []
 
-            for chunk in chunks:
-                chunk_metadata = build_chunk_metadata(
-                    source_id=document["source_id"],
-                    document_id=payload.document_id,
-                    document_title=document["document_title"],
-                    source_code=document["source_code"],
-                    content_sha256=chunk.content_sha256,
-                    index_version_id=payload.index_version_id,
-                    vector_collection=index_version["vector_collection"],
-                    page_start=chunk.page_start,
-                    page_end=chunk.page_end,
-                    extra={
-                        **_chunk_document_metadata(document["document_metadata"]),
-                        **chunk.metadata,
-                        "embedding_provider": embedding_client.provider,
-                        "embedding_model": embedding_client.model,
-                        "embedding_dimension": embedding_client.dimension,
-                        "model_call_id": str(model_call_id),
-                    },
-                )
-
+            for chunk_id, chunk, chunk_metadata in prepared_chunks:
                 cur.execute(
                     """
                     INSERT INTO document_chunks (
-                        document_id,
+                        id, document_id,
                         index_version_id,
                         chunk_index,
                         content,
@@ -756,11 +832,12 @@ async def index_document(payload: IndexRequest) -> RunRead:
                         token_count,
                         metadata
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                     ON CONFLICT (index_version_id, content_sha256) DO NOTHING
                     RETURNING id
                     """,
                     (
+                        chunk_id,
                         payload.document_id,
                         payload.index_version_id,
                         chunk.chunk_index,
@@ -776,12 +853,12 @@ async def index_document(payload: IndexRequest) -> RunRead:
                 if inserted is None:
                     chunks_skipped_duplicate += 1
                     continue
-                inserted_chunks.append((inserted["id"], chunk))
+                inserted_chunks.append((chunk_id, chunk, chunk_metadata))
 
             embedding_result = None
             if inserted_chunks:
                 embedding_result = await embedding_client.embed_texts(
-                    [chunk.content for _, chunk in inserted_chunks],
+                    [chunk.content for _, chunk, _ in inserted_chunks],
                     metadata={
                         "index_version_id": str(payload.index_version_id),
                         "document_id": str(payload.document_id),
@@ -846,34 +923,15 @@ async def index_document(payload: IndexRequest) -> RunRead:
                 )
 
                 points = []
-                for (chunk_id, chunk), vector in zip(
+                for (chunk_id, _chunk, chunk_metadata), vector in zip(
                     inserted_chunks,
                     embedding_result.vectors,
                 ):
-                    chunk_metadata = build_chunk_metadata(
-                        source_id=document["source_id"],
-                        document_id=payload.document_id,
-                        document_title=document["document_title"],
-                        source_code=document["source_code"],
-                        content_sha256=chunk.content_sha256,
-                        index_version_id=payload.index_version_id,
-                        vector_collection=index_version["vector_collection"],
-                        page_start=chunk.page_start,
-                        page_end=chunk.page_end,
-                        extra={
-                            **_chunk_document_metadata(document["document_metadata"]),
-                            **chunk.metadata,
-                            "embedding_provider": embedding_client.provider,
-                            "embedding_model": embedding_client.model,
-                            "embedding_dimension": embedding_result.dimension,
-                            "model_call_id": str(model_call_id),
-                        },
-                    )
                     points.append(
                         (
                             chunk_id,
                             vector,
-                            build_qdrant_payload(
+                            build_canonical_qdrant_payload(
                                 chunk_id=chunk_id,
                                 chunk_metadata=chunk_metadata,
                             ),
@@ -1646,10 +1704,17 @@ async def ingest_pdf(
 ) -> IngestionResponse:
     title = file.filename or source_code
     normalized_source_code = source_code.strip().lower()
-    functional_metadata = _normalize_ingestion_metadata_or_400(
+    source_id = uuid4()
+    document_id = uuid4()
+    document_metadata = _normalize_ingestion_metadata_or_400(
         metadata_json,
         title=title,
         source_code=normalized_source_code,
+        mime_type=file.content_type or "application/pdf",
+        filename=file.filename,
+        author=author,
+        source_id=source_id,
+        document_id=document_id,
     )
     content = await file.read()
     storage_path, digest = save_uploaded_file(file.filename or "upload.pdf", content)
@@ -1658,20 +1723,15 @@ async def ingest_pdf(
         ocr_client=get_ocr_client(),
     )
     raw_text = extraction.raw_text
-    document_metadata = {
-        **functional_metadata,
-        **extraction.metadata(),
-    }
-
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO sources (code, source_type, origin, author)
-                VALUES (%s, 'pdf', %s, %s)
+                INSERT INTO sources (id, code, source_type, origin, author)
+                VALUES (%s, %s, 'pdf', %s, %s)
                 RETURNING id
                 """,
-                (normalized_source_code, origin, author),
+                (source_id, normalized_source_code, origin, author),
             )
             source_id = cur.fetchone()["id"]
 
@@ -1679,13 +1739,14 @@ async def ingest_pdf(
                 cur.execute(
                     """
                     INSERT INTO documents (
-                        source_id, title, filename, mime_type,
+                        id, source_id, title, filename, mime_type,
                         storage_path, sha256, status, raw_text, metadata
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, 'parsed', %s, %s::jsonb)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'parsed', %s, %s::jsonb)
                     RETURNING id
                     """,
                     (
+                        document_id,
                         source_id,
                         title,
                         file.filename,
@@ -1723,14 +1784,14 @@ async def ingest_pdf(
                             "filename": file.filename,
                             "source_code": normalized_source_code,
                             "extraction_status": extraction.status,
-                            "metadata": functional_metadata,
+                            "metadata": document_metadata,
                         }
                     ),
                     json.dumps(
                         {
                             "project": project_trace_payload(),
                             "document_id": str(document_id),
-                            "extraction": document_metadata["extraction"],
+                            **extraction.metadata(),
                         }
                     ),
                 ),
@@ -1751,9 +1812,20 @@ async def get_document_extraction(document_id: UUID) -> DocumentExtractionRead:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, title, metadata
+                SELECT
+                    documents.id,
+                    documents.title,
+                    ingestion_run.output AS ingestion_output
                 FROM documents
-                WHERE id = %s
+                LEFT JOIN LATERAL (
+                    SELECT output
+                    FROM runs
+                    WHERE run_type = 'ingestion'
+                      AND output->>'document_id' = documents.id::text
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                ) AS ingestion_run ON true
+                WHERE documents.id = %s
                 """,
                 (document_id,),
             )
@@ -1762,9 +1834,9 @@ async def get_document_extraction(document_id: UUID) -> DocumentExtractionRead:
     if document is None:
         raise ValueError(f"Document not found: {document_id}")
 
-    metadata = document["metadata"] or {}
-    extraction = metadata.get("extraction") or {}
-    pages = metadata.get("extracted_pages") or []
+    ingestion_output = document["ingestion_output"] or {}
+    extraction = ingestion_output.get("extraction") or {}
+    pages = ingestion_output.get("extracted_pages") or []
 
     return DocumentExtractionRead(
         document_id=document["id"],
@@ -1786,34 +1858,41 @@ async def ingest_text(
     raw_text = normalize_text(text)
     digest = sha256_bytes(raw_text.encode("utf-8"))
     normalized_source_code = source_code.strip().lower()
+    source_id = uuid4()
+    document_id = uuid4()
     document_metadata = _normalize_ingestion_metadata_or_400(
         metadata_json,
         title=title,
         source_code=normalized_source_code,
+        mime_type="text/plain",
+        filename=None,
+        author=author,
+        source_id=source_id,
+        document_id=document_id,
     )
-
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO sources (code, source_type, origin, author)
-                VALUES (%s, 'text', %s, %s)
+                INSERT INTO sources (id, code, source_type, origin, author)
+                VALUES (%s, %s, 'text', %s, %s)
                 RETURNING id
                 """,
-                (normalized_source_code, origin, author),
+                (source_id, normalized_source_code, origin, author),
             )
             source_id = cur.fetchone()["id"]
 
             cur.execute(
                 """
                 INSERT INTO documents (
-                    source_id, title, filename, mime_type,
+                    id, source_id, title, filename, mime_type,
                     storage_path, sha256, status, raw_text, metadata
                 )
-                VALUES (%s, %s, NULL, 'text/plain', NULL, %s, 'parsed', %s, %s::jsonb)
+                VALUES (%s, %s, %s, NULL, 'text/plain', NULL, %s, 'parsed', %s, %s::jsonb)
                 RETURNING id
                 """,
                 (
+                    document_id,
                     source_id,
                     title,
                     digest,
