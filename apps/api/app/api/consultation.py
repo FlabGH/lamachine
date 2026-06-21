@@ -56,6 +56,7 @@ class MetadataCatalogItem(StrictModel):
     propagate_to_qdrant: bool
     qdrant_required: bool
     retrieval_filterable: bool
+    values_owner: str
     values: list[str] | None = None
 
 
@@ -254,6 +255,7 @@ def _entry_to_catalog_item(entry: MetadataFieldDefinition) -> MetadataCatalogIte
         propagate_to_qdrant=entry.propagate_to_qdrant,
         retrieval_filterable=entry.retrieval_filterable,
         qdrant_required=entry.qdrant_required,
+        values_owner=entry.values_owner.value,
         values=entry.values,
     )
 

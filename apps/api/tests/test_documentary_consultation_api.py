@@ -289,8 +289,9 @@ def test_metadata_catalog_exposes_registry_contract():
 
     item = response.fields["document_type"]
     assert item.kind == "project_business"
-    assert item.type == "free"
+    assert item.type == "enum"
     assert item.scopes == ["document", "chunk"]
+    assert item.values_owner == "project"
     assert item.values is None
     assert "role_documentaire" not in response.fields
 

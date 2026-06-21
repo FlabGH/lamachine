@@ -5,108 +5,152 @@ from pydantic import ValidationError
 
 from app.services.documentary.metadata_registry import (
     MetadataRegistry,
+    ProjectMetadataRegistry,
+    load_core_metadata_registry,
     load_metadata_registry,
+    load_project_metadata_registry,
+    merge_metadata_registries,
 )
 
 
-REGISTRY_PATH = (
-    Path(__file__).resolve().parents[1] / "config" / "metadata_registry.yaml"
-)
+CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
+CORE_REGISTRY_PATH = CONFIG_DIR / "metadata_registry.core.yaml"
+PROJECT_REGISTRY_PATH = CONFIG_DIR / "metadata_registry.project.yaml"
 
 
-def test_default_registry_loads_canonical_core_fields():
-    registry = load_metadata_registry(REGISTRY_PATH)
-
-    assert registry.fields["title"].kind.value == "core_business"
-    assert registry.fields["document_type"].kind.value == "project_business"
-    assert registry.fields["visibility_scope"].kind.value == "access_control"
-    assert registry.fields["chunk_id"].kind.value == "technical"
-
-
-def test_default_registry_uses_requested_canonical_names_only():
-    registry = load_metadata_registry(REGISTRY_PATH)
-    excluded = {
-        "type_document",
-        "statut_metadonnees",
-        "mode_qualification",
-        "content_sha256",
-        "sha256",
-        "chunk_size_words",
-        "chunk_overlap_words",
-        "published_at",
-        "document_title",
-        "section",
-        "origin",
-        "source_type",
-        "code",
-        "name",
-        "id",
-        "status",
-        "metadata",
-        "content",
-        "text",
-        "raw_text",
-        "input",
-        "output",
-        "parameters",
-        "response_metadata",
+def _field(**overrides):
+    field = {
+        "kind": "core_business",
+        "type": "free",
+        "scopes": ["document"],
+        "required": False,
+        "propagate_to_chunks": False,
+        "propagate_to_qdrant": False,
+        "qdrant_required": False,
+        "retrieval_filterable": False,
+        "values_owner": "none",
+        "values": None,
     }
+    field.update(overrides)
+    return field
 
-    assert excluded.isdisjoint(registry.fields)
-    assert {"document_type", "metadata_status", "qualification_mode"} <= set(
-        registry.fields
+
+def test_core_and_default_project_registries_load():
+    core = load_core_metadata_registry(CORE_REGISTRY_PATH)
+    project = load_project_metadata_registry(PROJECT_REGISTRY_PATH)
+    effective = load_metadata_registry(CORE_REGISTRY_PATH, PROJECT_REGISTRY_PATH)
+
+    assert core.fields["language"].values_owner.value == "core"
+    assert core.fields["document_type"].values_owner.value == "project"
+    assert project.overrides == {}
+    assert project.fields == {}
+    assert effective == core
+
+
+def test_project_values_are_merged_into_open_core_field():
+    core = MetadataRegistry.model_validate(
+        {"fields": {"document_type": _field(type="enum", values_owner="project")}}
+    )
+    project = ProjectMetadataRegistry.model_validate(
+        {"overrides": {"document_type": {"values": ["report", "article"]}}}
     )
 
+    effective = merge_metadata_registries(core, project)
 
-def test_default_registry_only_declares_explicit_runtime_categories():
-    registry = load_metadata_registry(REGISTRY_PATH)
-
-    assert {
-        field.kind.value
-        for field in registry.fields.values()
-    }.isdisjoint({"runtime", "observability"})
+    assert effective.fields["document_type"].values == ["report", "article"]
 
 
-def test_registry_rejects_values_for_non_enum_fields():
-    with pytest.raises(ValidationError, match="only allowed for enum"):
+def test_project_can_add_project_business_field_without_python_code():
+    core = MetadataRegistry.model_validate({"fields": {"title": _field()}})
+    project = ProjectMetadataRegistry.model_validate(
+        {
+            "fields": {
+                "role_documentaire": _field(
+                    kind="project_business",
+                    type="enum",
+                    values_owner="project",
+                    values=["reference", "opponent"],
+                )
+            }
+        }
+    )
+
+    effective = merge_metadata_registries(core, project)
+
+    assert effective.fields["role_documentaire"].kind.value == "project_business"
+    assert effective.fields["role_documentaire"].values == ["reference", "opponent"]
+
+
+def test_list_fields_can_be_open_to_project_values():
+    core = load_core_metadata_registry(CORE_REGISTRY_PATH)
+
+    assert core.fields["theme_tags"].type.value == "list"
+    assert core.fields["theme_tags"].values_owner.value == "project"
+    assert core.fields["theme_tags"].values is None
+    assert core.fields["data_tags"].type.value == "list"
+    assert core.fields["data_tags"].values is None
+
+
+def test_project_cannot_override_closed_core_values():
+    core = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "language": _field(
+                    type="enum",
+                    values_owner="core",
+                    values=["fr", "en"],
+                )
+            }
+        }
+    )
+    project = ProjectMetadataRegistry.model_validate(
+        {"overrides": {"language": {"values": ["fr"]}}}
+    )
+
+    with pytest.raises(ValueError, match="does not allow project values"):
+        merge_metadata_registries(core, project)
+
+
+def test_registry_rejects_invalid_qdrant_requirement():
+    with pytest.raises(ValidationError, match="must propagate_to_qdrant"):
+        MetadataRegistry.model_validate(
+            {"fields": {"document_id": _field(qdrant_required=True)}}
+        )
+
+
+def test_registry_rejects_values_for_unsupported_type():
+    with pytest.raises(ValidationError, match="enum or list"):
+        MetadataRegistry.model_validate(
+            {"fields": {"title": _field(values_owner="project", values=["x"])}}
+        )
+
+
+def test_registry_rejects_core_values_owner_without_values():
+    with pytest.raises(ValidationError, match="requires non-empty values"):
         MetadataRegistry.model_validate(
             {
                 "fields": {
-                    "title": {
-                        "kind": "core_business",
-                        "type": "free",
-                        "scopes": ["document"],
-                        "required": True,
-                        "propagate_to_chunks": False,
-                        "propagate_to_qdrant": False,
-                        "qdrant_required": False,
-                        "retrieval_filterable": False,
-                        "values": ["invalid"],
-                    }
+                    "language": _field(type="enum", values_owner="core")
                 }
             }
         )
 
 
-def test_registry_rejects_enum_without_values():
-    with pytest.raises(ValidationError, match="must define non-empty values"):
-        MetadataRegistry.model_validate(
-            {
-                "fields": {
-                    "language": {
-                        "kind": "core_business",
-                        "type": "enum",
-                        "scopes": ["document"],
-                        "required": False,
-                        "propagate_to_chunks": False,
-                        "propagate_to_qdrant": False,
-                        "qdrant_required": False,
-                        "retrieval_filterable": False,
-                        "values": None,
-                    }
-                }
+def test_project_cannot_add_technical_field():
+    core = MetadataRegistry.model_validate({"fields": {"title": _field()}})
+    project = ProjectMetadataRegistry.model_validate(
+        {
+            "fields": {
+                "custom_runtime": _field(
+                    kind="technical",
+                    values_owner="project",
+                )
             }
-        )
+        }
+    )
+
+    with pytest.raises(ValueError, match="project_business"):
+        merge_metadata_registries(core, project)
 
 
 def test_registry_rejects_duplicate_yaml_keys(tmp_path):
@@ -115,30 +159,12 @@ def test_registry_rejects_duplicate_yaml_keys(tmp_path):
         "\n".join(
             [
                 "fields:",
-                "  title:",
-                "    kind: core_business",
-                "    type: free",
-                "    scopes: [document]",
-                "    required: true",
-                "    propagate_to_chunks: false",
-                "    propagate_to_qdrant: false",
-                "    qdrant_required: false",
-                "    retrieval_filterable: false",
-                "    values: null",
-                "  title:",
-                "    kind: core_business",
-                "    type: free",
-                "    scopes: [document]",
-                "    required: false",
-                "    propagate_to_chunks: false",
-                "    propagate_to_qdrant: false",
-                "    qdrant_required: false",
-                "    retrieval_filterable: false",
-                "    values: null",
+                "  title: {}",
+                "  title: {}",
             ]
         ),
         encoding="utf-8",
     )
 
     with pytest.raises(ValueError, match="Duplicate YAML key: title"):
-        load_metadata_registry(path)
+        load_core_metadata_registry(path)
