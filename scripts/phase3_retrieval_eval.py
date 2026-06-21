@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import yaml
 
@@ -93,8 +93,6 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _validate_manifest(manifest_path: Path, files_dir: Path) -> list[dict[str, Any]]:
-    from app.services.documentary.metadata_contract import normalize_document_metadata
-
     data = _load_yaml(manifest_path)
     documents = data.get("documents")
     if not isinstance(documents, list) or not documents:
@@ -107,12 +105,6 @@ def _validate_manifest(manifest_path: Path, files_dir: Path) -> list[dict[str, A
             errors.append(f"document[{index}] must be an object")
             continue
 
-        try:
-            metadata = normalize_document_metadata(document)
-        except ValueError as exc:
-            errors.append(f"{document.get('file', f'document[{index}]')}: {exc}")
-            continue
-
         file_name = document.get("file")
         if not isinstance(file_name, str) or not file_name.strip():
             errors.append(f"document[{index}] missing file")
@@ -121,6 +113,17 @@ def _validate_manifest(manifest_path: Path, files_dir: Path) -> list[dict[str, A
         file_path = files_dir / file_name
         if not file_path.exists():
             errors.append(f"{file_name}: file not found in {files_dir}")
+            continue
+
+        metadata = {key: value for key, value in document.items() if key != "file"}
+        if not isinstance(metadata.get("title"), str) or not metadata["title"].strip():
+            errors.append(f"{file_name}: title must be a non-empty string")
+            continue
+        if (
+            not isinstance(metadata.get("source_code"), str)
+            or not metadata["source_code"].strip()
+        ):
+            errors.append(f"{file_name}: source_code must be a non-empty string")
             continue
 
         normalized_documents.append(
@@ -264,6 +267,8 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
         save_uploaded_file,
         sha256_bytes,
     )
+    from app.services.documentary.metadata_registry import MetadataScope, get_metadata_registry
+    from app.services.documentary.metadata_validation import validate_metadata
 
     metadata = dict(document["metadata"])
     file_path: Path = document["file_path"]
@@ -271,42 +276,43 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
     digest = sha256_bytes(content)
     storage_path, _ = save_uploaded_file(file_path.name, content)
     extraction = await extract_pdf_with_optional_ocr(storage_path, ocr_client=get_ocr_client())
-    document_metadata = {
-        **metadata,
-        **extraction.metadata(),
-    }
+    source_id = uuid4()
+    document_id = uuid4()
+    document_metadata = validate_metadata(
+        {
+            **metadata,
+            "source_id": str(source_id),
+            "document_id": str(document_id),
+            "mime_type": "application/pdf",
+            "filename": file_path.name,
+        },
+        scope=MetadataScope.document,
+        registry=get_metadata_registry(),
+    )
 
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO sources (code, source_type, origin)
-                VALUES (%s, 'pdf', %s)
+                INSERT INTO sources (id, code, source_type, origin)
+                VALUES (%s, %s, 'pdf', %s)
                 RETURNING id
                 """,
-                (metadata["source_code"], "phase3_step7_manifest"),
+                (source_id, metadata["source_code"], "phase3_step7_manifest"),
             )
             source_id = cur.fetchone()["id"]
 
             cur.execute(
                 """
                 INSERT INTO documents (
-                    source_id, title, filename, mime_type,
+                    id, source_id, title, filename, mime_type,
                     storage_path, sha256, status, raw_text, metadata
                 )
-                VALUES (%s, %s, %s, 'application/pdf', %s, %s, 'parsed', %s, %s::jsonb)
-                ON CONFLICT (sha256) DO UPDATE
-                SET source_id = EXCLUDED.source_id,
-                    title = EXCLUDED.title,
-                    filename = EXCLUDED.filename,
-                    mime_type = EXCLUDED.mime_type,
-                    storage_path = EXCLUDED.storage_path,
-                    status = 'parsed',
-                    raw_text = EXCLUDED.raw_text,
-                    metadata = EXCLUDED.metadata
+                VALUES (%s, %s, %s, %s, 'application/pdf', %s, %s, 'parsed', %s, %s::jsonb)
                 RETURNING id
                 """,
                 (
+                    document_id,
                     source_id,
                     metadata["title"],
                     file_path.name,
@@ -317,6 +323,32 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
                 ),
             )
             document_id = cur.fetchone()["id"]
+
+            cur.execute(
+                """
+                INSERT INTO runs (run_type, status, input, output, finished_at)
+                VALUES (%s, %s, %s::jsonb, %s::jsonb, now())
+                """,
+                (
+                    "ingestion",
+                    "succeeded",
+                    json.dumps(
+                        {
+                            "filename": file_path.name,
+                            "source_code": metadata["source_code"],
+                            "metadata": document_metadata,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        {
+                            "document_id": str(document_id),
+                            **extraction.metadata(),
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
 
     return document_id
 
