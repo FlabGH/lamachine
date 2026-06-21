@@ -9,6 +9,7 @@ from app.services.documentary.metadata_validation import (
     build_qdrant_payload,
     propagate_document_metadata,
     validate_qdrant_payload,
+    validate_retrieval_filters,
     validate_metadata,
 )
 
@@ -249,3 +250,74 @@ def test_validate_qdrant_payload_revalidates_enum_values():
         )
 
     assert exc_info.value.issues[0].code == "invalid_enum_value"
+
+
+def test_validate_retrieval_filters_accepts_and_deduplicates_values():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "language": _field(
+                    type="enum",
+                    scopes=["chunk"],
+                    propagate_to_qdrant=True,
+                    retrieval_filterable=True,
+                    values_owner="core",
+                    values=["fr", "en"],
+                ),
+                "theme_tags": _field(
+                    type="list",
+                    scopes=["chunk"],
+                    propagate_to_qdrant=True,
+                    retrieval_filterable=True,
+                    values_owner="project",
+                    values=["budget", "health"],
+                ),
+            }
+        }
+    )
+
+    assert validate_retrieval_filters(
+        {"language": ["fr", "fr"], "theme_tags": ["budget", "budget"]},
+        registry=registry,
+    ) == {"language": ["fr"], "theme_tags": ["budget"]}
+
+
+@pytest.mark.parametrize(
+    ("filters", "code"),
+    [
+        ({"unknown": ["value"]}, "unknown_filter_field"),
+        ({"title": ["Document"]}, "filter_not_allowed"),
+        ({"language": ["de"]}, "invalid_enum_value"),
+        ({"theme_tags": ["invalid"]}, "invalid_list_value"),
+        ({"language": []}, "invalid_filter_values"),
+    ],
+)
+def test_validate_retrieval_filters_rejects_invalid_values(filters, code):
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "title": _field(scopes=["chunk"]),
+                "language": _field(
+                    type="enum",
+                    scopes=["chunk"],
+                    propagate_to_qdrant=True,
+                    retrieval_filterable=True,
+                    values_owner="core",
+                    values=["fr", "en"],
+                ),
+                "theme_tags": _field(
+                    type="list",
+                    scopes=["chunk"],
+                    propagate_to_qdrant=True,
+                    retrieval_filterable=True,
+                    values_owner="project",
+                    values=["budget"],
+                ),
+            }
+        }
+    )
+
+    with pytest.raises(MetadataValidationError) as exc_info:
+        validate_retrieval_filters(filters, registry=registry)
+
+    assert exc_info.value.issues[0].code == code

@@ -165,6 +165,20 @@ def test_registry_rejects_qdrant_field_without_chunk_scope():
         )
 
 
+def test_registry_rejects_filterable_field_without_qdrant_propagation():
+    with pytest.raises(ValidationError, match="propagate_to_qdrant"):
+        MetadataRegistry.model_validate(
+            {
+                "fields": {
+                    "title": _field(
+                        scopes=["chunk"],
+                        retrieval_filterable=True,
+                    )
+                }
+            }
+        )
+
+
 def test_registry_rejects_values_for_unsupported_type():
     with pytest.raises(ValidationError, match="enum or list"):
         MetadataRegistry.model_validate(
