@@ -106,8 +106,19 @@ def test_audit_checks_scope_and_qdrant_requirements():
 
     assert document_report.issues[0].code == "scope_not_allowed"
     assert {issue.code for issue in chunk_report.issues} == {
-        "qdrant_required_field_missing"
+        "required_field_missing"
     }
+
+
+def test_audit_rejects_non_propagating_qdrant_field():
+    report = audit_metadata(
+        {"chunk_id": "chunk-1", "title": "Test"},
+        scope=MetadataScope.chunk,
+        registry=_registry(),
+        qdrant_payload=True,
+    )
+
+    assert report.issues[0].code == "qdrant_field_not_allowed"
 
 
 def test_audit_command_returns_json_and_nonzero_for_issues(tmp_path, capsys):

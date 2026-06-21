@@ -6,6 +6,9 @@ from app.services.documentary.metadata_registry import (
 )
 from app.services.documentary.metadata_validation import (
     MetadataValidationError,
+    build_qdrant_payload,
+    propagate_document_metadata,
+    validate_qdrant_payload,
     validate_metadata,
 )
 
@@ -107,3 +110,142 @@ def test_validate_metadata_rejects_empty_optional_value_when_provided():
 
 def test_validate_metadata_requires_chunk_fields_in_chunk_scope():
     assert "required_field_missing" in _issue_codes({}, scope=MetadataScope.chunk)
+
+
+def test_propagate_document_metadata_copies_declared_values():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "theme_tags": _field(
+                    type="list",
+                    scopes=["document", "chunk"],
+                    propagate_to_chunks=True,
+                    values_owner="project",
+                ),
+                "author": _field(),
+            }
+        }
+    )
+    document_metadata = {"theme_tags": ["budget"]}
+
+    propagated = propagate_document_metadata(
+        document_metadata,
+        {"chunk_index": 0},
+        registry=registry,
+    )
+
+    assert propagated["theme_tags"] == ["budget"]
+    assert propagated["theme_tags"] is not document_metadata["theme_tags"]
+    assert "author" not in propagated
+
+
+def test_propagate_document_metadata_rejects_conflicting_chunk_value():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "source_code": _field(
+                    scopes=["document", "chunk"],
+                    propagate_to_chunks=True,
+                )
+            }
+        }
+    )
+
+    with pytest.raises(MetadataValidationError) as exc_info:
+        propagate_document_metadata(
+            {"source_code": "official"},
+            {"source_code": "other"},
+            registry=registry,
+        )
+
+    assert exc_info.value.issues[0].code == "propagation_conflict"
+
+
+def test_build_qdrant_payload_filters_and_validates_chunk_metadata():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "source_code": _field(
+                    scopes=["chunk"],
+                    required=True,
+                    propagate_to_qdrant=True,
+                    qdrant_required=True,
+                ),
+                "chunk_id": _field(
+                    scopes=["chunk"],
+                    required=True,
+                    propagate_to_qdrant=True,
+                    qdrant_required=True,
+                ),
+                "chunk_index": _field(
+                    type="integer",
+                    scopes=["chunk"],
+                    required=True,
+                ),
+            }
+        }
+    )
+
+    payload = build_qdrant_payload(
+        {"source_code": "official", "chunk_id": "chunk-1", "chunk_index": 0},
+        registry=registry,
+    )
+
+    assert payload == {"source_code": "official", "chunk_id": "chunk-1"}
+
+
+def test_validate_qdrant_payload_rejects_missing_required_and_disallowed_fields():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "chunk_id": _field(
+                    scopes=["chunk"],
+                    required=True,
+                    propagate_to_qdrant=True,
+                    qdrant_required=True,
+                ),
+                "chunk_index": _field(type="integer", scopes=["chunk"]),
+            }
+        }
+    )
+
+    with pytest.raises(MetadataValidationError) as missing_exc:
+        validate_qdrant_payload({}, registry=registry)
+    assert missing_exc.value.issues[0].code == "required_field_missing"
+
+    with pytest.raises(MetadataValidationError) as disallowed_exc:
+        validate_qdrant_payload(
+            {"chunk_id": "chunk-1", "chunk_index": 0},
+            registry=registry,
+        )
+    assert disallowed_exc.value.issues[0].code == "qdrant_field_not_allowed"
+
+
+def test_validate_qdrant_payload_revalidates_enum_values():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "chunk_id": _field(
+                    scopes=["chunk"],
+                    required=True,
+                    propagate_to_qdrant=True,
+                    qdrant_required=True,
+                ),
+                "language": _field(
+                    type="enum",
+                    scopes=["chunk"],
+                    propagate_to_qdrant=True,
+                    values_owner="core",
+                    values=["fr", "en"],
+                ),
+            }
+        }
+    )
+
+    with pytest.raises(MetadataValidationError) as exc_info:
+        validate_qdrant_payload(
+            {"chunk_id": "chunk-1", "language": "de"},
+            registry=registry,
+        )
+
+    assert exc_info.value.issues[0].code == "invalid_enum_value"

@@ -34,7 +34,6 @@ from app.services.documentary.metadata_contract import (
     SERVICE_FAMILY_VALUES,
     VISIBILITY_SCOPE_VALUES,
     build_canonical_chunk_metadata,
-    build_canonical_qdrant_payload,
 )
 from app.services.documentary.metadata_registry import (
     MetadataScope,
@@ -42,6 +41,8 @@ from app.services.documentary.metadata_registry import (
 )
 from app.services.documentary.metadata_validation import (
     MetadataValidationError,
+    build_qdrant_payload,
+    propagate_document_metadata,
     validate_metadata,
 )
 
@@ -507,21 +508,6 @@ async def create_source(payload: SourceCreate) -> SourceRead:
     raise NotImplementedError
 
 
-def _chunk_document_metadata(document_metadata: dict | None) -> dict:
-    if not document_metadata:
-        return {}
-    registry = get_metadata_registry()
-    return {
-        key: value
-        for key, value in document_metadata.items()
-        if (
-            (field := registry.fields.get(key)) is not None
-            and MetadataScope.chunk in field.scopes
-            and field.propagate_to_chunks
-        )
-    }
-
-
 def _parse_ingestion_metadata_json(metadata_json: str | None) -> dict:
     if metadata_json is None or not isinstance(metadata_json, str):
         return {}
@@ -698,9 +684,6 @@ async def index_document(payload: IndexRequest) -> RunRead:
             chunks = deduplicate_chunks(candidate_chunks)
             chunks_skipped_duplicate = len(candidate_chunks) - len(chunks)
 
-            document_chunk_metadata = _chunk_document_metadata(
-                document["document_metadata"]
-            )
             prepared_chunks = []
             for chunk in chunks:
                 chunk_id = uuid4()
@@ -722,19 +705,32 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     page_start=chunk.page_start,
                     page_end=chunk.page_end,
                     extra={
-                        **document_chunk_metadata,
-                        **chunk.metadata,
                         "embedding_provider": embedding_client.provider,
                         "embedding_model": embedding_client.model,
                         "embedding_dimension": embedding_client.dimension,
                     },
+                )
+                chunk_metadata = {
+                    **chunk_metadata,
+                    **chunk.metadata,
+                }
+                chunk_metadata = propagate_document_metadata(
+                    document["document_metadata"] or {},
+                    chunk_metadata,
+                    registry=registry,
                 )
                 validate_metadata(
                     chunk_metadata,
                     scope=MetadataScope.chunk,
                     registry=registry,
                 )
-                prepared_chunks.append((chunk_id, chunk, chunk_metadata))
+                qdrant_payload = build_qdrant_payload(
+                    chunk_metadata,
+                    registry=registry,
+                )
+                prepared_chunks.append(
+                    (chunk_id, chunk, chunk_metadata, qdrant_payload)
+                )
 
             cur.execute(
                 """
@@ -818,7 +814,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
 
             inserted_chunks = []
 
-            for chunk_id, chunk, chunk_metadata in prepared_chunks:
+            for chunk_id, chunk, chunk_metadata, qdrant_payload in prepared_chunks:
                 cur.execute(
                     """
                     INSERT INTO document_chunks (
@@ -853,12 +849,12 @@ async def index_document(payload: IndexRequest) -> RunRead:
                 if inserted is None:
                     chunks_skipped_duplicate += 1
                     continue
-                inserted_chunks.append((chunk_id, chunk, chunk_metadata))
+                inserted_chunks.append((chunk_id, chunk, chunk_metadata, qdrant_payload))
 
             embedding_result = None
             if inserted_chunks:
                 embedding_result = await embedding_client.embed_texts(
-                    [chunk.content for _, chunk, _ in inserted_chunks],
+                    [chunk.content for _, chunk, _, _ in inserted_chunks],
                     metadata={
                         "index_version_id": str(payload.index_version_id),
                         "document_id": str(payload.document_id),
@@ -923,7 +919,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                 )
 
                 points = []
-                for (chunk_id, _chunk, chunk_metadata), vector in zip(
+                for (chunk_id, _chunk, _chunk_metadata, qdrant_payload), vector in zip(
                     inserted_chunks,
                     embedding_result.vectors,
                 ):
@@ -931,13 +927,16 @@ async def index_document(payload: IndexRequest) -> RunRead:
                         (
                             chunk_id,
                             vector,
-                            build_canonical_qdrant_payload(
-                                chunk_id=chunk_id,
-                                chunk_metadata=chunk_metadata,
-                            ),
+                            qdrant_payload,
                         )
                     )
 
+                upsert_chunks(
+                    qdrant,
+                    collection_name=index_version["vector_collection"],
+                    points=points,
+                )
+                for chunk_id, _chunk, _chunk_metadata, _qdrant_payload in inserted_chunks:
                     cur.execute(
                         """
                         UPDATE document_chunks
@@ -946,12 +945,6 @@ async def index_document(payload: IndexRequest) -> RunRead:
                         """,
                         (chunk_id, chunk_id),
                     )
-
-                upsert_chunks(
-                    qdrant,
-                    collection_name=index_version["vector_collection"],
-                    points=points,
-                )
 
             cur.execute(
                 """

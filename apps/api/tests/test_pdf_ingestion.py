@@ -6,7 +6,6 @@ import pytest
 from fastapi import HTTPException
 
 from app.services.ai.clients import OcrPage, OcrResult
-from app.api.documentary import _chunk_document_metadata
 from app.api import documentary
 from app.services.documentary import ingestion
 from app.services.documentary.chunking import chunk_text
@@ -507,20 +506,6 @@ def test_chunk_text_preserves_page_range_and_section_title():
     assert chunks[0].page_start == 3
     assert chunks[0].page_end == 3
     assert chunks[0].metadata["section_title"] == "Introduction"
-
-
-def test_chunk_document_metadata_excludes_extraction_payloads():
-    metadata = {
-        "source_code": "source_factuelle",
-        "language": "fr",
-        "extraction": {"status": "success"},
-        "extracted_pages": [{"page": 1, "text": "large text"}],
-    }
-
-    assert _chunk_document_metadata(metadata) == {
-        "source_code": "source_factuelle",
-        "language": "fr",
-    }
 
 
 def test_get_document_extraction_returns_stored_report_without_reprocessing(monkeypatch):
