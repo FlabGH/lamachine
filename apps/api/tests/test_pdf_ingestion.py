@@ -511,15 +511,15 @@ def test_chunk_text_preserves_page_range_and_section_title():
 
 def test_chunk_document_metadata_excludes_extraction_payloads():
     metadata = {
-        "role_documentaire": "source_factuelle",
-        "statut_metadonnees": "brouillon",
+        "source_code": "source_factuelle",
+        "language": "fr",
         "extraction": {"status": "success"},
         "extracted_pages": [{"page": 1, "text": "large text"}],
     }
 
     assert _chunk_document_metadata(metadata) == {
-        "role_documentaire": "source_factuelle",
-        "statut_metadonnees": "brouillon",
+        "source_code": "source_factuelle",
+        "language": "fr",
     }
 
 
@@ -540,7 +540,7 @@ def test_get_document_extraction_returns_stored_report_without_reprocessing(monk
             return {
                 "id": document_id,
                 "title": "Document PDF",
-                "metadata": {
+                "ingestion_output": {
                     "extraction": {
                         "method": "pypdf.extract_text",
                         "status": "success",
@@ -601,9 +601,9 @@ def test_ingest_text_accepts_without_enriched_metadata(monkeypatch):
     assert response.document_id == UUID("00000000-0000-0000-0000-000000000002")
     assert metadata["title"] == "Note texte"
     assert metadata["source_code"] == "source"
-    assert metadata["data_tags"] == ["corpus"]
-    assert metadata["service_family"] == "transverse"
-    assert metadata["visibility_scope"] == "public"
+    assert metadata["mime_type"] == "text/plain"
+    assert UUID(metadata["source_id"])
+    assert metadata["document_id"]
 
 
 def test_ingest_text_stores_enriched_metadata(monkeypatch):
@@ -622,14 +622,12 @@ def test_ingest_text_stores_enriched_metadata(monkeypatch):
             metadata_json=json.dumps(
                 {
                     "data_tags": ["interne", "parlement"],
-                    "service_family": "debat",
-                    "service_ids": ["I.1"],
-                    "visibility_scope": "organisation",
+                    "visibility_scope": "organization",
                     "organization_id": "Equipe-Test",
                     "access_level": "restricted",
                     "language": "fr",
                     "is_primary_source": True,
-                    "citation_policy": "interne_only",
+                    "citation_policy": "internal_only",
                     "rights_status": "internal",
                 }
             ),
@@ -638,13 +636,11 @@ def test_ingest_text_stores_enriched_metadata(monkeypatch):
     metadata = _document_insert_metadata(cursor)
 
     assert metadata["data_tags"] == ["interne", "parlement"]
-    assert metadata["service_family"] == "debat"
-    assert metadata["service_ids"] == ["I.1"]
-    assert metadata["visibility_scope"] == "organisation"
-    assert metadata["organization_id"] == "equipe-test"
+    assert metadata["visibility_scope"] == "organization"
+    assert metadata["organization_id"] == "Equipe-Test"
     assert metadata["access_level"] == "restricted"
     assert metadata["is_primary_source"] is True
-    assert metadata["citation_policy"] == "interne_only"
+    assert metadata["citation_policy"] == "internal_only"
     assert metadata["rights_status"] == "internal"
 
 
@@ -661,6 +657,29 @@ def test_ingest_text_returns_400_on_invalid_metadata_json():
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["error"] == "invalid_metadata_json"
+
+
+def test_ingest_text_returns_400_on_unknown_metadata(monkeypatch):
+    cursor = CapturingCursor()
+    monkeypatch.setattr(
+        documentary,
+        "get_connection",
+        lambda: CapturingConnection(cursor),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documentary.ingest_text(
+                title="Note texte",
+                text="Contenu texte",
+                source_code="source",
+                metadata_json=json.dumps({"unknown_field": "value"}),
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["error"] == "invalid_metadata"
+    assert "unknown_field" in exc_info.value.detail["message"]
 
 
 def test_ingest_pdf_stores_enriched_metadata_and_extraction(monkeypatch):
@@ -693,8 +712,6 @@ def test_ingest_pdf_stores_enriched_metadata_and_extraction(monkeypatch):
             metadata_json=json.dumps(
                 {
                     "data_tags": ["corpus", "presse"],
-                    "service_family": "rapport",
-                    "service_ids": ["XVI.1"],
                     "source_url": "https://example.test/pdf",
                     "publication_date": "2026-05-01",
                     "freshness_status": "current",
@@ -706,13 +723,11 @@ def test_ingest_pdf_stores_enriched_metadata_and_extraction(monkeypatch):
 
     assert metadata["source_code"] == "pdf"
     assert metadata["data_tags"] == ["corpus", "presse"]
-    assert metadata["service_family"] == "rapport"
-    assert metadata["service_ids"] == ["XVI.1"]
     assert metadata["source_url"] == "https://example.test/pdf"
     assert metadata["publication_date"] == "2026-05-01"
     assert metadata["freshness_status"] == "current"
-    assert metadata["extraction"]["status"] == "success"
-    assert metadata["extracted_pages"][0]["page"] == 1
+    assert "extraction" not in metadata
+    assert "extracted_pages" not in metadata
 
 
 def test_ingest_pdf_returns_409_on_duplicate_sha256(monkeypatch):

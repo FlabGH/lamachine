@@ -21,7 +21,12 @@ class MetadataValidationIssue:
 class MetadataValidationError(ValueError):
     def __init__(self, issues: list[MetadataValidationIssue]) -> None:
         self.issues = tuple(issues)
-        super().__init__("; ".join(issue.message for issue in self.issues))
+        super().__init__(
+            "; ".join(
+                f"{issue.field}: {issue.message}" if issue.field else issue.message
+                for issue in self.issues
+            )
+        )
 
 
 def _is_empty(value: Any) -> bool:

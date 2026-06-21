@@ -4,7 +4,7 @@ import hashlib
 import os
 import re
 from enum import Enum
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
@@ -35,7 +35,14 @@ from app.services.documentary.metadata_contract import (
     VISIBILITY_SCOPE_VALUES,
     build_chunk_metadata,
     build_qdrant_payload,
-    normalize_ingestion_metadata,
+)
+from app.services.documentary.metadata_registry import (
+    MetadataScope,
+    get_metadata_registry,
+)
+from app.services.documentary.metadata_validation import (
+    MetadataValidationError,
+    validate_metadata,
 )
 
 from app.services.ai.factory import (
@@ -541,15 +548,55 @@ def _normalize_ingestion_metadata_or_400(
     *,
     title: str,
     source_code: str,
+    mime_type: str,
+    filename: str | None,
+    author: str | None,
+    source_id: UUID,
+    document_id: UUID,
 ) -> dict:
     parsed = _parse_ingestion_metadata_json(metadata_json)
-    try:
-        return normalize_ingestion_metadata(
-            parsed,
-            title=title,
-            source_code=source_code,
+    controlled_fields = {
+        "title",
+        "source_code",
+        "mime_type",
+        "filename",
+        "author",
+        "source_id",
+        "document_id",
+    }
+    conflicts = sorted(controlled_fields.intersection(parsed))
+    if conflicts:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata",
+                "message": (
+                    "metadata_json must not override server-controlled fields: "
+                    f"{', '.join(conflicts)}"
+                ),
+            },
         )
-    except ValueError as exc:
+
+    metadata = {
+        **parsed,
+        "title": title.strip(),
+        "source_code": source_code.strip().lower(),
+        "mime_type": mime_type.strip(),
+        "source_id": str(source_id),
+        "document_id": str(document_id),
+    }
+    if isinstance(filename, str):
+        metadata["filename"] = filename.strip()
+    if isinstance(author, str):
+        metadata["author"] = author.strip()
+
+    try:
+        return validate_metadata(
+            metadata,
+            scope=MetadataScope.document,
+            registry=get_metadata_registry(),
+        )
+    except MetadataValidationError as exc:
         raise HTTPException(
             status_code=400,
             detail={
@@ -1646,10 +1693,17 @@ async def ingest_pdf(
 ) -> IngestionResponse:
     title = file.filename or source_code
     normalized_source_code = source_code.strip().lower()
-    functional_metadata = _normalize_ingestion_metadata_or_400(
+    source_id = uuid4()
+    document_id = uuid4()
+    document_metadata = _normalize_ingestion_metadata_or_400(
         metadata_json,
         title=title,
         source_code=normalized_source_code,
+        mime_type=file.content_type or "application/pdf",
+        filename=file.filename,
+        author=author,
+        source_id=source_id,
+        document_id=document_id,
     )
     content = await file.read()
     storage_path, digest = save_uploaded_file(file.filename or "upload.pdf", content)
@@ -1658,20 +1712,15 @@ async def ingest_pdf(
         ocr_client=get_ocr_client(),
     )
     raw_text = extraction.raw_text
-    document_metadata = {
-        **functional_metadata,
-        **extraction.metadata(),
-    }
-
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO sources (code, source_type, origin, author)
-                VALUES (%s, 'pdf', %s, %s)
+                INSERT INTO sources (id, code, source_type, origin, author)
+                VALUES (%s, %s, 'pdf', %s, %s)
                 RETURNING id
                 """,
-                (normalized_source_code, origin, author),
+                (source_id, normalized_source_code, origin, author),
             )
             source_id = cur.fetchone()["id"]
 
@@ -1679,13 +1728,14 @@ async def ingest_pdf(
                 cur.execute(
                     """
                     INSERT INTO documents (
-                        source_id, title, filename, mime_type,
+                        id, source_id, title, filename, mime_type,
                         storage_path, sha256, status, raw_text, metadata
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, 'parsed', %s, %s::jsonb)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'parsed', %s, %s::jsonb)
                     RETURNING id
                     """,
                     (
+                        document_id,
                         source_id,
                         title,
                         file.filename,
@@ -1723,14 +1773,14 @@ async def ingest_pdf(
                             "filename": file.filename,
                             "source_code": normalized_source_code,
                             "extraction_status": extraction.status,
-                            "metadata": functional_metadata,
+                            "metadata": document_metadata,
                         }
                     ),
                     json.dumps(
                         {
                             "project": project_trace_payload(),
                             "document_id": str(document_id),
-                            "extraction": document_metadata["extraction"],
+                            **extraction.metadata(),
                         }
                     ),
                 ),
@@ -1751,9 +1801,20 @@ async def get_document_extraction(document_id: UUID) -> DocumentExtractionRead:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, title, metadata
+                SELECT
+                    documents.id,
+                    documents.title,
+                    ingestion_run.output AS ingestion_output
                 FROM documents
-                WHERE id = %s
+                LEFT JOIN LATERAL (
+                    SELECT output
+                    FROM runs
+                    WHERE run_type = 'ingestion'
+                      AND output->>'document_id' = documents.id::text
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                ) AS ingestion_run ON true
+                WHERE documents.id = %s
                 """,
                 (document_id,),
             )
@@ -1762,9 +1823,9 @@ async def get_document_extraction(document_id: UUID) -> DocumentExtractionRead:
     if document is None:
         raise ValueError(f"Document not found: {document_id}")
 
-    metadata = document["metadata"] or {}
-    extraction = metadata.get("extraction") or {}
-    pages = metadata.get("extracted_pages") or []
+    ingestion_output = document["ingestion_output"] or {}
+    extraction = ingestion_output.get("extraction") or {}
+    pages = ingestion_output.get("extracted_pages") or []
 
     return DocumentExtractionRead(
         document_id=document["id"],
@@ -1786,34 +1847,41 @@ async def ingest_text(
     raw_text = normalize_text(text)
     digest = sha256_bytes(raw_text.encode("utf-8"))
     normalized_source_code = source_code.strip().lower()
+    source_id = uuid4()
+    document_id = uuid4()
     document_metadata = _normalize_ingestion_metadata_or_400(
         metadata_json,
         title=title,
         source_code=normalized_source_code,
+        mime_type="text/plain",
+        filename=None,
+        author=author,
+        source_id=source_id,
+        document_id=document_id,
     )
-
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO sources (code, source_type, origin, author)
-                VALUES (%s, 'text', %s, %s)
+                INSERT INTO sources (id, code, source_type, origin, author)
+                VALUES (%s, %s, 'text', %s, %s)
                 RETURNING id
                 """,
-                (normalized_source_code, origin, author),
+                (source_id, normalized_source_code, origin, author),
             )
             source_id = cur.fetchone()["id"]
 
             cur.execute(
                 """
                 INSERT INTO documents (
-                    source_id, title, filename, mime_type,
+                    id, source_id, title, filename, mime_type,
                     storage_path, sha256, status, raw_text, metadata
                 )
-                VALUES (%s, %s, NULL, 'text/plain', NULL, %s, 'parsed', %s, %s::jsonb)
+                VALUES (%s, %s, %s, NULL, 'text/plain', NULL, %s, 'parsed', %s, %s::jsonb)
                 RETURNING id
                 """,
                 (
+                    document_id,
                     source_id,
                     title,
                     digest,
