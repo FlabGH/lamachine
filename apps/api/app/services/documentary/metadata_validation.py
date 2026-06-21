@@ -233,6 +233,132 @@ def build_qdrant_payload(
     return validate_qdrant_payload(payload, registry=registry)
 
 
+def validate_retrieval_filters(
+    filters: dict[str, list[Any]],
+    *,
+    registry: MetadataRegistry,
+) -> dict[str, list[Any]]:
+    """Validate retrieval filters against the effective metadata registry."""
+    issues: list[MetadataValidationIssue] = []
+    validated: dict[str, list[Any]] = {}
+
+    for name, raw_values in filters.items():
+        field = registry.fields.get(name)
+        if field is None:
+            issues.append(
+                MetadataValidationIssue(
+                    code="unknown_filter_field",
+                    field=name,
+                    message="Filter field is not declared in the effective metadata registry",
+                )
+            )
+            continue
+        if MetadataScope.chunk not in field.scopes:
+            issues.append(
+                MetadataValidationIssue(
+                    code="filter_scope_not_allowed",
+                    field=name,
+                    message="Filter field is not allowed in chunk scope",
+                )
+            )
+            continue
+        if not field.retrieval_filterable:
+            issues.append(
+                MetadataValidationIssue(
+                    code="filter_not_allowed",
+                    field=name,
+                    message="Field is not enabled for retrieval filtering",
+                )
+            )
+            continue
+        if not field.propagate_to_qdrant:
+            issues.append(
+                MetadataValidationIssue(
+                    code="filter_not_propagated_to_qdrant",
+                    field=name,
+                    message="Filter field is not propagated to Qdrant",
+                )
+            )
+            continue
+        if not isinstance(raw_values, list) or not raw_values:
+            issues.append(
+                MetadataValidationIssue(
+                    code="invalid_filter_values",
+                    field=name,
+                    message="Filter values must be a non-empty list",
+                )
+            )
+            continue
+
+        normalized_values: list[Any] = []
+        for value in raw_values:
+            if field.type is MetadataType.list:
+                if not isinstance(value, str) or not value.strip():
+                    issues.append(
+                        MetadataValidationIssue(
+                            code="invalid_filter_value_type",
+                            field=name,
+                            message="List filter values must be non-empty strings",
+                        )
+                    )
+                    continue
+                if field.values and value not in field.values:
+                    issues.append(
+                        MetadataValidationIssue(
+                            code="invalid_list_value",
+                            field=name,
+                            message=(
+                                "Filter value is outside the registry: "
+                                f"{value}"
+                            ),
+                        )
+                    )
+                    continue
+            else:
+                type_error = _type_error(field.type, value)
+                if _is_empty(value) or type_error:
+                    issues.append(
+                        MetadataValidationIssue(
+                            code="invalid_filter_value_type",
+                            field=name,
+                            message=type_error or "Filter value must not be empty",
+                        )
+                    )
+                    continue
+                if field.type is MetadataType.enum:
+                    if not field.values:
+                        issues.append(
+                            MetadataValidationIssue(
+                                code="enum_values_not_configured",
+                                field=name,
+                                message="Enum field has no effective allowed values",
+                            )
+                        )
+                        continue
+                    if value not in field.values:
+                        issues.append(
+                            MetadataValidationIssue(
+                                code="invalid_enum_value",
+                                field=name,
+                                message=(
+                                    "Filter value must be one of: "
+                                    f"{', '.join(field.values)}"
+                                ),
+                            )
+                        )
+                        continue
+
+            if value not in normalized_values:
+                normalized_values.append(value)
+
+        if normalized_values:
+            validated[name] = normalized_values
+
+    if issues:
+        raise MetadataValidationError(issues)
+    return validated
+
+
 def propagate_document_metadata(
     document_metadata: dict[str, Any],
     chunk_metadata: dict[str, Any],

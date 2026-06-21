@@ -1,3 +1,5 @@
+import asyncio
+
 from app.api.documentary import (
     LEXICAL_SEARCH_TEXT_SQL,
     GenerateNoteRequest,
@@ -7,9 +9,13 @@ from app.api.documentary import (
     _build_qdrant_search_filter,
     _build_lexical_websearch_query,
     _significant_lexical_terms,
+    _validate_search_filters_or_422,
+    search_documents,
 )
 import pytest
-from pydantic import ValidationError
+from fastapi import HTTPException
+
+from app.services.documentary.metadata_registry import get_metadata_registry
 
 
 INDEX_VERSION_ID = "00000000-0000-0000-0000-000000000000"
@@ -76,33 +82,45 @@ def test_generate_note_request_uses_same_retrieval_defaults(monkeypatch):
     assert request.rerank_top_k == 8
 
 
-def test_search_metadata_filters_normalize_values_and_deduplicate():
+def test_search_metadata_filters_preserve_generic_filter_payload():
     filters = SearchMetadataFilters(
-        source_code=[" PS ", "ps"],
-        role_documentaire=["Doctrine_Alliee"],
-        service_ids=["I.1", "I.1"],
+        source_code=["ps"],
+        language=["fr"],
     )
 
     assert filters.active_filters() == {
         "source_code": ["ps"],
-        "role_documentaire": ["doctrine_alliee"],
-        "service_ids": ["I.1"],
+        "language": ["fr"],
     }
 
 
-def test_search_metadata_filters_reject_invalid_value():
-    with pytest.raises(ValidationError) as exc_info:
-        SearchMetadataFilters(role_documentaire=["unknown_role"])
+def test_search_metadata_filters_reject_invalid_value_against_registry():
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_search_filters_or_422(SearchMetadataFilters(language=["de"]))
 
-    assert "Invalid role_documentaire filter values" in str(exc_info.value)
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["issues"][0]["code"] == "invalid_enum_value"
+
+
+def test_search_rejects_unfilterable_field_before_accessing_dependencies():
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            search_documents(
+                SearchRequest(
+                    query="test",
+                    index_version_id=INDEX_VERSION_ID,
+                    filters=SearchMetadataFilters(title=["Document"]),
+                )
+            )
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["issues"][0]["code"] == "filter_not_allowed"
 
 
 def test_build_qdrant_search_filter_uses_payload_fields():
     qdrant_filter = _build_qdrant_search_filter(
-        SearchMetadataFilters(
-            source_code=["ps"],
-            theme_tags=["ia"],
-        )
+        {"source_code": ["ps"], "theme_tags": ["ia"]}
     )
 
     assert qdrant_filter is not None
@@ -116,13 +134,15 @@ def test_build_qdrant_search_filter_uses_payload_fields():
 
 def test_build_metadata_filter_sql_handles_scalar_and_array_fields():
     sql, params = _build_metadata_filter_sql(
-        SearchMetadataFilters(
-            source_code=["ps"],
-            theme_tags=["ia", "service_public"],
-        ),
+        {"source_code": ["ps"], "theme_tags": ["ia", "service_public"]},
         metadata_expression="document_chunks.metadata",
+        registry=get_metadata_registry(),
     )
 
-    assert "(document_chunks.metadata->>'source_code') = ANY(%s)" in sql
-    assert "(document_chunks.metadata->'theme_tags') ?| %s" in sql
-    assert params == [["ps"], ["ia", "service_public"]]
+    assert "document_chunks.metadata @> %s::jsonb" in sql
+    assert "(document_chunks.metadata->%s) ?| %s" in sql
+    assert params == [
+        '{"source_code": "ps"}',
+        "theme_tags",
+        ["ia", "service_public"],
+    ]

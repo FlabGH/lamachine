@@ -487,7 +487,7 @@ def test_stable_search_facade_reuses_documentary_search_and_adds_scores(monkeypa
             consultation.StableSearchRequest(
                 query="IA bien commun",
                 index_version_id=INDEX_VERSION_ID,
-                filters=consultation.SearchMetadataFilters(source_code=["PS"]),
+                    filters=consultation.SearchMetadataFilters(source_code=["ps"]),
             )
         )
     )

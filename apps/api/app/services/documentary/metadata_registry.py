@@ -100,6 +100,12 @@ class MetadataFieldDefinition(BaseModel):
             raise ValueError("Qdrant fields must allow chunk scope")
         if self.qdrant_required and MetadataScope.chunk not in scopes:
             raise ValueError("qdrant_required fields must allow chunk scope")
+        if self.retrieval_filterable and MetadataScope.chunk not in scopes:
+            raise ValueError("retrieval_filterable fields must allow chunk scope")
+        if self.retrieval_filterable and not self.propagate_to_qdrant:
+            raise ValueError(
+                "retrieval_filterable fields must propagate_to_qdrant"
+            )
         if self.type not in {MetadataType.enum, MetadataType.list} and self.values:
             raise ValueError("values are only allowed for enum or list fields")
         if self.values_owner is ValuesOwner.none and self.values is not None:
