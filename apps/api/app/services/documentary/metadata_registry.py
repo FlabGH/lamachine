@@ -62,6 +62,15 @@ class MetadataFieldDefinition(BaseModel):
     retrieval_filterable: bool
     values_owner: ValuesOwner
     values: list[str] | None = None
+    description: str = Field(min_length=1)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("description must not be empty")
+        return normalized
 
     @field_validator("scopes")
     @classmethod
@@ -109,16 +118,23 @@ class MetadataRegistry(BaseModel):
         return fields
 
 
-class MetadataValuesOverride(BaseModel):
+class MetadataFieldOverride(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    values: list[str] = Field(min_length=1)
+    values: list[str] | None = Field(default=None, min_length=1)
+    description: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def require_change(self) -> "MetadataFieldOverride":
+        if self.values is None and self.description is None:
+            raise ValueError("project overrides must define values or description")
+        return self
 
 
 class ProjectMetadataRegistry(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    overrides: dict[str, MetadataValuesOverride] = Field(default_factory=dict)
+    overrides: dict[str, MetadataFieldOverride] = Field(default_factory=dict)
     fields: dict[str, MetadataFieldDefinition] = Field(default_factory=dict)
 
 
@@ -174,9 +190,14 @@ def merge_metadata_registries(
         core_field = fields.get(name)
         if core_field is None:
             raise ValueError(f"Project override targets unknown core field: {name}")
-        if core_field.values_owner is not ValuesOwner.project:
+        updates = {}
+        if override.values is not None and core_field.values_owner is not ValuesOwner.project:
             raise ValueError(f"Core field does not allow project values: {name}")
-        fields[name] = core_field.model_copy(update={"values": override.values})
+        if override.values is not None:
+            updates["values"] = override.values
+        if override.description is not None:
+            updates["description"] = override.description
+        fields[name] = core_field.model_copy(update=updates)
 
     for name, project_field in project_registry.fields.items():
         if name in fields:

@@ -293,6 +293,7 @@ def test_metadata_catalog_exposes_registry_contract():
     assert item.scopes == ["document", "chunk"]
     assert item.values_owner == "project"
     assert item.values is None
+    assert item.description == "Functional category defined by the project."
     assert "role_documentaire" not in response.fields
 
 

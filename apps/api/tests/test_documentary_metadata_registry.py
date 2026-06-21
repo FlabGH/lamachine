@@ -30,6 +30,7 @@ def _field(**overrides):
         "retrieval_filterable": False,
         "values_owner": "none",
         "values": None,
+        "description": "Test field description.",
     }
     field.update(overrides)
     return field
@@ -42,6 +43,7 @@ def test_core_and_default_project_registries_load():
 
     assert core.fields["language"].values_owner.value == "core"
     assert core.fields["document_type"].values_owner.value == "project"
+    assert all(field.description for field in core.fields.values())
     assert project.overrides == {}
     assert project.fields == {}
     assert effective == core
@@ -60,6 +62,29 @@ def test_project_values_are_merged_into_open_core_field():
     assert effective.fields["document_type"].values == ["report", "article"]
 
 
+def test_project_can_override_core_description_without_opening_values():
+    core = MetadataRegistry.model_validate({"fields": {"title": _field()}})
+    project = ProjectMetadataRegistry.model_validate(
+        {"overrides": {"title": {"description": "Project title label."}}}
+    )
+
+    effective = merge_metadata_registries(core, project)
+
+    assert effective.fields["title"].description == "Project title label."
+
+
+def test_project_override_requires_values_or_description():
+    with pytest.raises(ValidationError, match="values or description"):
+        ProjectMetadataRegistry.model_validate({"overrides": {"title": {}}})
+
+
+def test_registry_rejects_empty_description():
+    with pytest.raises(ValidationError, match="description"):
+        MetadataRegistry.model_validate(
+            {"fields": {"title": _field(description=" ")}}
+        )
+
+
 def test_project_can_add_project_business_field_without_python_code():
     core = MetadataRegistry.model_validate({"fields": {"title": _field()}})
     project = ProjectMetadataRegistry.model_validate(
@@ -70,6 +95,7 @@ def test_project_can_add_project_business_field_without_python_code():
                     type="enum",
                     values_owner="project",
                     values=["reference", "opponent"],
+                    description="Project documentary role.",
                 )
             }
         }

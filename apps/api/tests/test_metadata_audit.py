@@ -24,6 +24,7 @@ def _field(**overrides):
         "retrieval_filterable": False,
         "values_owner": "none",
         "values": None,
+        "description": "Test field description.",
     }
     field.update(overrides)
     return field
@@ -128,6 +129,7 @@ def test_audit_command_returns_json_and_nonzero_for_issues(tmp_path, capsys):
                 "    retrieval_filterable: false",
                 "    values_owner: none",
                 "    values: null",
+                "    description: Test field description.",
             ]
         ),
         encoding="utf-8",

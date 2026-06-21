@@ -58,6 +58,7 @@ class MetadataCatalogItem(StrictModel):
     retrieval_filterable: bool
     values_owner: str
     values: list[str] | None = None
+    description: str
 
 
 class MetadataCatalogResponse(StrictModel):
@@ -257,6 +258,7 @@ def _entry_to_catalog_item(entry: MetadataFieldDefinition) -> MetadataCatalogIte
         qdrant_required=entry.qdrant_required,
         values_owner=entry.values_owner.value,
         values=entry.values,
+        description=entry.description,
     )
 
 
