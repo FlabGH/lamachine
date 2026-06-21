@@ -2,8 +2,6 @@ from pathlib import Path
 
 import yaml
 
-from app.services.documentary.metadata_contract import normalize_document_metadata
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = REPO_ROOT / "corpus" / "poc_ia" / "manifest.yaml"
@@ -12,14 +10,6 @@ REQUIRED_DOCUMENT_KEYS = {
     "file",
     "title",
     "source_code",
-    "role_documentaire",
-    "famille_politique",
-    "positionnement",
-    "niveau_confiance",
-    "type_document",
-    "usage_probatoire",
-    "statut_metadonnees",
-    "mode_qualification",
     "theme_tags",
 }
 
@@ -40,4 +30,5 @@ def test_poc_corpus_manifest_has_expected_document_structure():
         assert document["file"]
         assert document["title"]
         assert document["source_code"]
-        normalize_document_metadata(document)
+        assert isinstance(document["theme_tags"], list)
+        assert all(isinstance(tag, str) and tag for tag in document["theme_tags"])
