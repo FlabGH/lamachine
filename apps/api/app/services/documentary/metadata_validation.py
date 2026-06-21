@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -173,3 +174,37 @@ def validate_metadata(
     if issues:
         raise MetadataValidationError(issues)
     return dict(metadata)
+
+
+def propagate_document_metadata(
+    document_metadata: dict[str, Any],
+    chunk_metadata: dict[str, Any],
+    *,
+    registry: MetadataRegistry,
+) -> dict[str, Any]:
+    """Copy declared document metadata into a chunk without silent overrides."""
+    propagated = dict(chunk_metadata)
+    issues: list[MetadataValidationIssue] = []
+
+    for name, field in registry.fields.items():
+        if not field.propagate_to_chunks or name not in document_metadata:
+            continue
+
+        document_value = document_metadata[name]
+        if name not in propagated:
+            propagated[name] = deepcopy(document_value)
+            continue
+        if propagated[name] != document_value:
+            issues.append(
+                MetadataValidationIssue(
+                    code="propagation_conflict",
+                    field=name,
+                    message=(
+                        "Chunk value conflicts with the propagated document value"
+                    ),
+                )
+            )
+
+    if issues:
+        raise MetadataValidationError(issues)
+    return propagated

@@ -144,6 +144,27 @@ def test_registry_rejects_invalid_qdrant_requirement():
         )
 
 
+def test_registry_rejects_propagation_without_document_and_chunk_scopes():
+    with pytest.raises(ValidationError, match="document and chunk scopes"):
+        MetadataRegistry.model_validate(
+            {"fields": {"title": _field(propagate_to_chunks=True)}}
+        )
+
+
+def test_registry_rejects_qdrant_field_without_chunk_scope():
+    with pytest.raises(ValidationError, match="chunk scope"):
+        MetadataRegistry.model_validate(
+            {
+                "fields": {
+                    "title": _field(
+                        scopes=["document"],
+                        propagate_to_qdrant=True,
+                    )
+                }
+            }
+        )
+
+
 def test_registry_rejects_values_for_unsupported_type():
     with pytest.raises(ValidationError, match="enum or list"):
         MetadataRegistry.model_validate(

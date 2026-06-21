@@ -6,6 +6,7 @@ from app.services.documentary.metadata_registry import (
 )
 from app.services.documentary.metadata_validation import (
     MetadataValidationError,
+    propagate_document_metadata,
     validate_metadata,
 )
 
@@ -107,3 +108,52 @@ def test_validate_metadata_rejects_empty_optional_value_when_provided():
 
 def test_validate_metadata_requires_chunk_fields_in_chunk_scope():
     assert "required_field_missing" in _issue_codes({}, scope=MetadataScope.chunk)
+
+
+def test_propagate_document_metadata_copies_declared_values():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "theme_tags": _field(
+                    type="list",
+                    scopes=["document", "chunk"],
+                    propagate_to_chunks=True,
+                    values_owner="project",
+                ),
+                "author": _field(),
+            }
+        }
+    )
+    document_metadata = {"theme_tags": ["budget"]}
+
+    propagated = propagate_document_metadata(
+        document_metadata,
+        {"chunk_index": 0},
+        registry=registry,
+    )
+
+    assert propagated["theme_tags"] == ["budget"]
+    assert propagated["theme_tags"] is not document_metadata["theme_tags"]
+    assert "author" not in propagated
+
+
+def test_propagate_document_metadata_rejects_conflicting_chunk_value():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "source_code": _field(
+                    scopes=["document", "chunk"],
+                    propagate_to_chunks=True,
+                )
+            }
+        }
+    )
+
+    with pytest.raises(MetadataValidationError) as exc_info:
+        propagate_document_metadata(
+            {"source_code": "official"},
+            {"source_code": "other"},
+            registry=registry,
+        )
+
+    assert exc_info.value.issues[0].code == "propagation_conflict"

@@ -88,6 +88,18 @@ class MetadataFieldDefinition(BaseModel):
             raise ValueError(
                 "qdrant_required fields must propagate_to_qdrant"
             )
+        scopes = set(self.scopes)
+        if self.propagate_to_chunks and not {
+            MetadataScope.document,
+            MetadataScope.chunk,
+        }.issubset(scopes):
+            raise ValueError(
+                "propagate_to_chunks fields must allow document and chunk scopes"
+            )
+        if self.propagate_to_qdrant and MetadataScope.chunk not in scopes:
+            raise ValueError("Qdrant fields must allow chunk scope")
+        if self.qdrant_required and MetadataScope.chunk not in scopes:
+            raise ValueError("qdrant_required fields must allow chunk scope")
         if self.type not in {MetadataType.enum, MetadataType.list} and self.values:
             raise ValueError("values are only allowed for enum or list fields")
         if self.values_owner is ValuesOwner.none and self.values is not None:
