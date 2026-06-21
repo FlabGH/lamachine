@@ -1,276 +1,144 @@
-from app.api.documentary import LEXICAL_SEARCH_TEXT_SQL
-from app.services.documentary.metadata_contract import (
-    CRITICAL_CHUNK_METADATA_KEYS,
-    DOCUMENT_METADATA_KEYS,
-)
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
 from app.services.documentary.metadata_registry import (
-    ALLOWED_IMPLEMENTATION_STATUSES,
-    ALLOWED_LEVELS,
-    ALLOWED_STORAGES,
-    ALLOWED_USES,
-    EXPORT_COLUMNS,
-    METADATA_REGISTRY,
-    METADATA_REGISTRY_BY_NAME,
-    QDRANT_REQUIRED_METADATA,
+    MetadataRegistry,
+    load_metadata_registry,
 )
 
 
-def test_registry_metadata_names_are_unique():
-    names = [entry.metadata for entry in METADATA_REGISTRY]
-
-    assert len(names) == len(set(names))
-
-
-def test_registry_levels_are_allowed():
-    invalid = [
-        entry.metadata
-        for entry in METADATA_REGISTRY
-        if entry.level not in ALLOWED_LEVELS
-    ]
-
-    assert invalid == []
+REGISTRY_PATH = (
+    Path(__file__).resolve().parents[1] / "config" / "metadata_registry.yaml"
+)
 
 
-def test_registry_storage_values_are_allowed():
-    invalid = [
-        (entry.metadata, storage)
-        for entry in METADATA_REGISTRY
-        for storage in entry.storage
-        if storage not in ALLOWED_STORAGES
-    ]
+def test_default_registry_loads_canonical_core_fields():
+    registry = load_metadata_registry(REGISTRY_PATH)
 
-    assert invalid == []
+    assert registry.fields["title"].kind.value == "core_business"
+    assert registry.fields["document_type"].kind.value == "project_business"
+    assert registry.fields["visibility_scope"].kind.value == "access_control"
+    assert registry.fields["chunk_id"].kind.value == "technical"
 
 
-def test_registry_uses_are_allowed():
-    invalid = [
-        (entry.metadata, use)
-        for entry in METADATA_REGISTRY
-        for use in entry.uses
-        if use not in ALLOWED_USES
-    ]
-
-    assert invalid == []
-
-
-def test_registry_implementation_statuses_are_allowed():
-    invalid = [
-        (entry.metadata, entry.implementation_status)
-        for entry in METADATA_REGISTRY
-        if entry.implementation_status not in ALLOWED_IMPLEMENTATION_STATUSES
-    ]
-
-    assert invalid == []
-
-
-def test_qdrant_propagation_requires_chunk_metadata_or_documented_exception():
-    invalid = [
-        entry.metadata
-        for entry in METADATA_REGISTRY
-        if entry.propagate_to_qdrant
-        and not entry.propagate_to_chunk
-        and not entry.qdrant_without_chunk_reason
-    ]
-
-    assert invalid == []
-
-
-def test_qdrant_required_fields_are_strict_and_minimal():
-    qdrant_required = {
-        entry.metadata
-        for entry in METADATA_REGISTRY
-        if entry.qdrant_required
-    }
-
-    assert qdrant_required == QDRANT_REQUIRED_METADATA
-    assert "vector_collection" not in qdrant_required
-
-
-def test_deprecated_chunking_aliases_are_documented():
-    expected_aliases = {
-        "chunking_strategy": "chunking_version",
-        "chunk_size_words": "chunk_size",
-        "chunk_overlap_words": "chunk_overlap",
-    }
-
-    for alias, canonical in expected_aliases.items():
-        entry = METADATA_REGISTRY_BY_NAME[alias]
-        assert entry.deprecated is True
-        assert entry.alias_of == canonical
-        assert entry.implementation_status == "deprecated"
-
-
-def test_model_trace_metadata_are_registered():
-    model_trace_metadata = {
-        "embedding_provider",
-        "embedding_model",
-        "embedding_dimension",
-        "embedding_model_call_id",
-        "reranker_provider",
-        "reranker_model",
-        "rerank_model_call_id",
-        "llm_provider",
-        "llm_model",
-        "llm_model_call_id",
-        "ai_backend_preset",
-        "call_type",
-        "provider",
-        "model",
-        "input_hash",
+def test_default_registry_uses_requested_canonical_names_only():
+    registry = load_metadata_registry(REGISTRY_PATH)
+    excluded = {
+        "type_document",
+        "statut_metadonnees",
+        "mode_qualification",
+        "content_sha256",
+        "sha256",
+        "chunk_size_words",
+        "chunk_overlap_words",
+        "published_at",
+        "document_title",
+        "section",
+        "origin",
+        "source_type",
+        "code",
+        "name",
+        "id",
+        "status",
+        "metadata",
+        "content",
+        "text",
+        "raw_text",
+        "input",
+        "output",
         "parameters",
         "response_metadata",
-        "latency_ms",
-        "token_input",
-        "token_output",
-        "cost_estimate",
     }
 
-    missing = sorted(model_trace_metadata - set(METADATA_REGISTRY_BY_NAME))
-
-    assert missing == []
-
-
-def test_structural_chunking_metadata_are_registered():
-    structural_metadata = {
-        "heading_path",
-        "section_level",
-        "structural_chunking_status",
-        "structural_chunking_warnings",
-    }
-
-    for metadata in structural_metadata:
-        entry = METADATA_REGISTRY_BY_NAME[metadata]
-        assert entry.level == "chunk"
-        assert entry.propagate_to_chunk is True
-        assert entry.propagate_to_qdrant is True
-
-
-def test_ingestion_metadata_have_ui_descriptions_and_allowed_values():
-    expected_described = {
-        "source_code",
-        "role_documentaire",
-        "type_document",
-        "theme_tags",
-        "data_tags",
-        "service_family",
-        "service_ids",
-        "visibility_scope",
-        "organization_id",
-        "access_level",
-        "language",
-    }
-    expected_controlled = {
-        "role_documentaire",
-        "type_document",
-        "data_tags",
-        "service_family",
-        "visibility_scope",
-        "access_level",
-        "language",
-    }
-
-    for metadata in expected_described:
-        assert METADATA_REGISTRY_BY_NAME[metadata].description
-
-    for metadata in expected_controlled:
-        assert METADATA_REGISTRY_BY_NAME[metadata].allowed_values
-
-
-def test_retrieval_filterable_metadata_status_matches_filter_implementation():
-    implemented_filters = {
-        "source_code",
-        "role_documentaire",
-        "theme_tags",
-        "data_tags",
-        "service_family",
-        "service_ids",
-        "visibility_scope",
-        "organization_id",
-        "access_level",
-        "language",
-    }
-
-    invalid = []
-    for entry in METADATA_REGISTRY:
-        if not entry.retrieval_filterable:
-            continue
-        if entry.metadata in implemented_filters:
-            if entry.implementation_status != "implemented":
-                invalid.append((entry.metadata, entry.implementation_status))
-        elif entry.implementation_status not in {"partial", "planned"}:
-            invalid.append((entry.metadata, entry.implementation_status))
-
-    assert invalid == []
-
-
-def test_document_contract_keys_are_registered():
-    missing = [
-        key
-        for key in sorted(DOCUMENT_METADATA_KEYS)
-        if key not in METADATA_REGISTRY_BY_NAME
-    ]
-
-    assert missing == []
-
-
-def test_critical_chunk_metadata_keys_are_registered():
-    missing = [
-        key
-        for key in sorted(CRITICAL_CHUNK_METADATA_KEYS)
-        if key not in METADATA_REGISTRY_BY_NAME
-    ]
-
-    assert missing == []
-
-
-def test_limited_extraction_metadata_scope_is_registered():
-    extraction_keys = {
-        "extraction",
-        "extracted_pages",
-        "extraction.status",
-        "extraction.ocr_used",
-        "extraction.page_count",
-        "extraction.layout_quality_status",
-        "extraction.errors",
-    }
-
-    assert extraction_keys <= set(METADATA_REGISTRY_BY_NAME)
-
-    unexpected_exhaustive_keys = {
-        "extraction.ocr_provider",
-        "extraction.ocr_model",
-        "extraction.warnings",
-        "extracted_pages[].text",
-    }
-
-    assert unexpected_exhaustive_keys.isdisjoint(METADATA_REGISTRY_BY_NAME)
-
-
-def test_lexical_metadata_fields_are_registered_as_retrieval_used():
-    lexical_metadata = {
-        "source_code",
-        "document_title",
-        "role_documentaire",
-        "theme_tags",
-    }
-
-    for metadata in lexical_metadata:
-        assert metadata in LEXICAL_SEARCH_TEXT_SQL
-        entry = METADATA_REGISTRY_BY_NAME[metadata]
-        assert "retrieval" in entry.uses
-
-
-def test_export_columns_keep_expected_order():
-    assert EXPORT_COLUMNS == (
-        "Metadata",
-        "level",
-        "storage",
-        "uses",
-        "implementation_status",
-        "allowed_values",
-        "default_value",
-        "propagate_to_chunk",
-        "propagate_to_qdrant",
-        "retrieval_filterable",
-        "qdrant_required",
+    assert excluded.isdisjoint(registry.fields)
+    assert {"document_type", "metadata_status", "qualification_mode"} <= set(
+        registry.fields
     )
+
+
+def test_default_registry_only_declares_explicit_runtime_categories():
+    registry = load_metadata_registry(REGISTRY_PATH)
+
+    assert {
+        field.kind.value
+        for field in registry.fields.values()
+    }.isdisjoint({"runtime", "observability"})
+
+
+def test_registry_rejects_values_for_non_enum_fields():
+    with pytest.raises(ValidationError, match="only allowed for enum"):
+        MetadataRegistry.model_validate(
+            {
+                "fields": {
+                    "title": {
+                        "kind": "core_business",
+                        "type": "free",
+                        "scopes": ["document"],
+                        "required": True,
+                        "propagate_to_chunks": False,
+                        "propagate_to_qdrant": False,
+                        "qdrant_required": False,
+                        "retrieval_filterable": False,
+                        "values": ["invalid"],
+                    }
+                }
+            }
+        )
+
+
+def test_registry_rejects_enum_without_values():
+    with pytest.raises(ValidationError, match="must define non-empty values"):
+        MetadataRegistry.model_validate(
+            {
+                "fields": {
+                    "language": {
+                        "kind": "core_business",
+                        "type": "enum",
+                        "scopes": ["document"],
+                        "required": False,
+                        "propagate_to_chunks": False,
+                        "propagate_to_qdrant": False,
+                        "qdrant_required": False,
+                        "retrieval_filterable": False,
+                        "values": None,
+                    }
+                }
+            }
+        )
+
+
+def test_registry_rejects_duplicate_yaml_keys(tmp_path):
+    path = tmp_path / "duplicate.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "fields:",
+                "  title:",
+                "    kind: core_business",
+                "    type: free",
+                "    scopes: [document]",
+                "    required: true",
+                "    propagate_to_chunks: false",
+                "    propagate_to_qdrant: false",
+                "    qdrant_required: false",
+                "    retrieval_filterable: false",
+                "    values: null",
+                "  title:",
+                "    kind: core_business",
+                "    type: free",
+                "    scopes: [document]",
+                "    required: false",
+                "    propagate_to_chunks: false",
+                "    propagate_to_qdrant: false",
+                "    qdrant_required: false",
+                "    retrieval_filterable: false",
+                "    values: null",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Duplicate YAML key: title"):
+        load_metadata_registry(path)

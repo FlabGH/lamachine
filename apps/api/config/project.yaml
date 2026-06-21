@@ -3,6 +3,6 @@ project_name: LaPythie
 config_version: 1
 
 documentary:
-  metadata_registry: python_registry_v1
+  metadata_registry: config/metadata_registry.yaml
   chunking_strategy: index_version_runtime
   retrieval_preset: hybrid_dense_lexical_rerank_v1

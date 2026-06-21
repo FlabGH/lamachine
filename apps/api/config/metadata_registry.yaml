@@ -1,0 +1,511 @@
+fields:
+  title:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  source_code:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: true
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: true
+    retrieval_filterable: true
+    values: null
+  source_id:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  source_url:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  author:
+    kind: core_business
+    type: free
+    scopes: [document]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  publication_date:
+    kind: core_business
+    type: date
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  collected_at:
+    kind: core_business
+    type: datetime
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  language:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values: [fr, en, multi, unknown]
+  is_primary_source:
+    kind: core_business
+    type: boolean
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  citation_policy:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: [citable, non_citable, internal_only, to_verify]
+  rights_status:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: [open, copyrighted, internal, unknown]
+  freshness_status:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: [current, stale, archived, unknown]
+  metadata_status:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: [draft, ai_proposed, human_validated, rejected]
+  qualification_mode:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: [manual, ai, import]
+  qualification_confidence:
+    kind: core_business
+    type: number
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  qualification_rationale:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  validated_by:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  validated_at:
+    kind: core_business
+    type: datetime
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  document_type:
+    kind: project_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  theme_tags:
+    kind: project_business
+    type: list
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values: null
+  data_tags:
+    kind: project_business
+    type: list
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values: null
+  geographic_scope:
+    kind: project_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  temporal_scope:
+    kind: project_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  visibility_scope:
+    kind: access_control
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values: [public, internal, restricted, organization]
+  organization_id:
+    kind: access_control
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values: null
+  access_level:
+    kind: access_control
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values: [open, authenticated, restricted, admin]
+  document_id:
+    kind: technical
+    type: free
+    scopes: [document, chunk]
+    required: true
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: true
+    retrieval_filterable: false
+    values: null
+  chunk_id:
+    kind: technical
+    type: free
+    scopes: [chunk, retrieval_hit]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: true
+    retrieval_filterable: false
+    values: null
+  chunk_index:
+    kind: technical
+    type: integer
+    scopes: [chunk]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  parent_document_id:
+    kind: technical
+    type: free
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  filename:
+    kind: technical
+    type: free
+    scopes: [document]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  mime_type:
+    kind: technical
+    type: free
+    scopes: [document]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  content_hash:
+    kind: technical
+    type: free
+    scopes: [chunk]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  document_version:
+    kind: technical
+    type: free
+    scopes: [document]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  ingestion_version:
+    kind: technical
+    type: free
+    scopes: [document, run]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  chunking_version:
+    kind: technical
+    type: free
+    scopes: [chunk, run]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  index_version:
+    kind: technical
+    type: free
+    scopes: [chunk, run, retrieval_hit]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  vector_collection:
+    kind: technical
+    type: free
+    scopes: [chunk, run]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  embedding_provider:
+    kind: technical
+    type: free
+    scopes: [chunk, run, model_call]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  embedding_model:
+    kind: technical
+    type: free
+    scopes: [chunk, run, model_call]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  embedding_dimension:
+    kind: technical
+    type: integer
+    scopes: [chunk, run, model_call]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  chunking_strategy:
+    kind: technical
+    type: free
+    scopes: [chunk, run]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  chunk_size:
+    kind: technical
+    type: integer
+    scopes: [chunk, run]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  chunk_overlap:
+    kind: technical
+    type: integer
+    scopes: [chunk, run]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  token_count:
+    kind: technical
+    type: integer
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  qdrant_point_id:
+    kind: technical
+    type: free
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  page_start:
+    kind: technical
+    type: integer
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  page_end:
+    kind: technical
+    type: integer
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  section_title:
+    kind: technical
+    type: free
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  heading_path:
+    kind: technical
+    type: list
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null
+  section_level:
+    kind: technical
+    type: integer
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values: null

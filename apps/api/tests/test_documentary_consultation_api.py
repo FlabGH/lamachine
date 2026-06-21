@@ -285,19 +285,14 @@ def _patch_connection(monkeypatch):
 
 
 def test_metadata_catalog_exposes_registry_contract():
-    response = consultation.get_metadata_catalog(retrieval_filterable=True)
+    response = consultation.get_metadata_catalog()
 
-    item = next(
-        item for item in response.items
-        if item.metadata == "role_documentaire"
-    )
-    assert item.implementation_status == "implemented"
-    assert "doctrine_alliee" in item.allowed_values
-    assert item.description == (
-        "Role documentaire de la source dans le corpus et le retrieval."
-    )
-    assert item.deprecated is False
-    assert not hasattr(item, "storage_path")
+    item = response.fields["document_type"]
+    assert item.kind == "project_business"
+    assert item.type == "free"
+    assert item.scopes == ["document", "chunk"]
+    assert item.values is None
+    assert "role_documentaire" not in response.fields
 
 
 def test_api_v1_alias_is_mounted():
@@ -322,17 +317,13 @@ def test_legacy_create_source_endpoint_is_deprecated_in_openapi():
 def test_search_capabilities_distinguish_implemented_and_planned_filters():
     response = consultation.get_search_capabilities()
 
-    implemented = {
-        item.metadata for item in response.implemented_filters
-    }
-    planned = {item.metadata for item in response.planned_filters}
-    assert {"source_code", "role_documentaire", "theme_tags"} <= implemented
-    assert "publication_date" in planned
+    implemented = set(response.implemented_filters)
+    assert {"source_code", "theme_tags", "data_tags"} <= implemented
+    assert response.planned_filters == []
     assert response.filter_semantics.between_fields == "AND"
     assert response.filter_semantics.within_field_values == "OR"
     assert response.filter_semantics.list_fields == [
         "data_tags",
-        "service_ids",
         "theme_tags",
     ]
     assert response.filter_semantics.invalid_filters == "rejected"
