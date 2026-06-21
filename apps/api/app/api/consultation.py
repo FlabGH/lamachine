@@ -15,7 +15,10 @@ from app.api.documentary import (
     search_documents as documentary_search_documents,
 )
 from app.db import get_connection
-from app.services.documentary.metadata_registry import METADATA_REGISTRY
+from app.services.documentary.metadata_registry import (
+    MetadataFieldDefinition,
+    get_metadata_registry,
+)
 from app.services.documentary.vector_store import get_qdrant_client
 
 
@@ -31,12 +34,7 @@ SENSITIVE_TRACE_KEYS = {
     "raw",
     "raw_response",
 }
-IMPLEMENTED_SEARCH_FILTERS = {
-    entry.metadata
-    for entry in METADATA_REGISTRY
-    if entry.retrieval_filterable and entry.implementation_status == "implemented"
-}
-LIST_SEARCH_FILTERS = {"theme_tags", "data_tags", "service_ids"}
+LIST_SEARCH_FILTERS = {"theme_tags", "data_tags"}
 
 
 class StrictModel(BaseModel):
@@ -50,21 +48,21 @@ class PaginatedResponse(StrictModel):
 
 
 class MetadataCatalogItem(StrictModel):
-    metadata: str
-    level: str
-    description: str
-    uses: list[str]
-    implementation_status: str
-    allowed_values: list[str] | None = None
-    default_value: Any | None = None
-    retrieval_filterable: bool
+    kind: str
+    type: str
+    scopes: list[str]
+    required: bool
+    propagate_to_chunks: bool
+    propagate_to_qdrant: bool
     qdrant_required: bool
-    alias_of: str | None = None
-    deprecated: bool
+    retrieval_filterable: bool
+    values_owner: str
+    values: list[str] | None = None
+    description: str
 
 
 class MetadataCatalogResponse(StrictModel):
-    items: list[MetadataCatalogItem]
+    fields: dict[str, MetadataCatalogItem]
 
 
 class SearchFilterSemantics(StrictModel):
@@ -77,9 +75,9 @@ class SearchFilterSemantics(StrictModel):
 class SearchCapabilitiesResponse(StrictModel):
     retrieval: dict[str, bool]
     filter_semantics: SearchFilterSemantics
-    implemented_filters: list[MetadataCatalogItem]
-    planned_filters: list[MetadataCatalogItem]
-    display_only_metadata: list[MetadataCatalogItem]
+    implemented_filters: list[str]
+    planned_filters: list[str]
+    display_only_metadata: list[str]
 
 
 class IndexVersionRead(StrictModel):
@@ -248,35 +246,19 @@ class StableSearchResponse(StrictModel):
     hits: list[StableSearchHit]
 
 
-def _metadata_description(metadata: str) -> str:
-    descriptions = {
-        "source_code": "Identifiant court et canonique de la source.",
-        "role_documentaire": "Role documentaire ou epistemique de la source.",
-        "theme_tags": "Tags thematiques associes au document.",
-        "data_tags": "Categories de donnees mobilisees ou necessaires.",
-        "service_family": "Famille de service LaMachine concernee.",
-        "service_ids": "Identifiants de services concernes.",
-        "visibility_scope": "Perimetre de visibilite du document.",
-        "organization_id": "Organisation proprietaire du document.",
-        "access_level": "Niveau d'acces fonctionnel.",
-        "language": "Langue principale du document.",
-    }
-    return descriptions.get(metadata, metadata.replace("_", " "))
-
-
-def _entry_to_catalog_item(entry) -> MetadataCatalogItem:
+def _entry_to_catalog_item(entry: MetadataFieldDefinition) -> MetadataCatalogItem:
     return MetadataCatalogItem(
-        metadata=entry.metadata,
-        level=entry.level,
-        description=entry.description or _metadata_description(entry.metadata),
-        uses=list(entry.uses),
-        implementation_status=entry.implementation_status,
-        allowed_values=list(entry.allowed_values) if entry.allowed_values else None,
-        default_value=entry.default_value,
+        kind=entry.kind.value,
+        type=entry.type.value,
+        scopes=[scope.value for scope in entry.scopes],
+        required=entry.required,
+        propagate_to_chunks=entry.propagate_to_chunks,
+        propagate_to_qdrant=entry.propagate_to_qdrant,
         retrieval_filterable=entry.retrieval_filterable,
         qdrant_required=entry.qdrant_required,
-        alias_of=entry.alias_of,
-        deprecated=entry.deprecated,
+        values_owner=entry.values_owner.value,
+        values=entry.values,
+        description=entry.description,
     )
 
 
@@ -370,39 +352,29 @@ def _qdrant_point_count(collection_name: str) -> int:
 
 
 @router.get("/metadata/catalog", response_model=MetadataCatalogResponse)
-def get_metadata_catalog(
-    level: str | None = None,
-    retrieval_filterable: bool | None = None,
-) -> MetadataCatalogResponse:
-    items = []
-    for entry in METADATA_REGISTRY:
-        if level is not None and entry.level != level:
-            continue
-        if (
-            retrieval_filterable is not None
-            and entry.retrieval_filterable is not retrieval_filterable
-        ):
-            continue
-        items.append(_entry_to_catalog_item(entry))
-    return MetadataCatalogResponse(items=items)
+def get_metadata_catalog() -> MetadataCatalogResponse:
+    registry = get_metadata_registry()
+    return MetadataCatalogResponse(
+        fields={
+            name: _entry_to_catalog_item(entry)
+            for name, entry in registry.fields.items()
+        }
+    )
 
 
 @router.get("/search/capabilities", response_model=SearchCapabilitiesResponse)
 def get_search_capabilities() -> SearchCapabilitiesResponse:
-    catalog_items = [_entry_to_catalog_item(entry) for entry in METADATA_REGISTRY]
-    implemented = [
-        item for item in catalog_items
-        if item.retrieval_filterable and item.implementation_status == "implemented"
-    ]
-    planned = [
-        item for item in catalog_items
-        if item.retrieval_filterable and item.implementation_status != "implemented"
-    ]
-    display_only = [
-        item for item in catalog_items
-        if not item.retrieval_filterable
-        and ("display" in item.uses or "audit" in item.uses)
-    ]
+    registry = get_metadata_registry()
+    implemented = sorted(
+        name
+        for name, entry in registry.fields.items()
+        if entry.retrieval_filterable
+    )
+    display_only = sorted(
+        name
+        for name, entry in registry.fields.items()
+        if not entry.retrieval_filterable
+    )
     return SearchCapabilitiesResponse(
         retrieval={
             "hybrid": True,
@@ -417,7 +389,7 @@ def get_search_capabilities() -> SearchCapabilitiesResponse:
             invalid_filters="rejected",
         ),
         implemented_filters=implemented,
-        planned_filters=planned,
+        planned_filters=[],
         display_only_metadata=display_only,
     )
 

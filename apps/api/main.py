@@ -8,10 +8,12 @@ from app.api.consultation import router as consultation_router
 from app.api.documentary import router as documentary_router
 from app.api.project import router as project_router
 from app.db import get_connection
+from app.services.documentary.metadata_registry import get_metadata_registry
 from app.services.project_config import get_project_config
 
 app = FastAPI(title="LaMachine POC API")
 app.state.project_config = get_project_config()
+app.state.metadata_registry = get_metadata_registry()
 
 app.include_router(config_router)                   # pour prod via Caddy handle_path
 app.include_router(documentary_router)              # pour prod via Caddy handle_path

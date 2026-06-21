@@ -17,7 +17,12 @@ def test_project_config_loads_default_contract():
     assert config.project_id == "lapythie-core"
     assert config.project_name == "LaPythie"
     assert config.config_version == 1
-    assert config.documentary.metadata_registry == "python_registry_v1"
+    assert config.documentary.metadata_registry.core == (
+        "config/metadata_registry.core.yaml"
+    )
+    assert config.documentary.metadata_registry.project == (
+        "config/metadata_registry.project.yaml"
+    )
     assert config.documentary.chunking_strategy == "index_version_runtime"
     assert config.documentary.retrieval_preset == "hybrid_dense_lexical_rerank_v1"
 
@@ -31,7 +36,9 @@ def test_project_config_path_can_be_overridden(monkeypatch, tmp_path):
                 "project_name: CorpusControle",
                 "config_version: 2",
                 "documentary:",
-                "  metadata_registry: registry_v2",
+                "  metadata_registry:",
+                "    core: config/registry.core.yaml",
+                "    project: config/registry.project.yaml",
                 "  chunking_strategy: section_aware_window_v1",
                 "  retrieval_preset: control_hybrid_v1",
             ]
@@ -68,7 +75,10 @@ def test_project_config_api_endpoint_is_exposed(monkeypatch):
         "project_name": "LaPythie",
         "config_version": 1,
         "documentary": {
-            "metadata_registry": "python_registry_v1",
+            "metadata_registry": {
+                "core": "config/metadata_registry.core.yaml",
+                "project": "config/metadata_registry.project.yaml",
+            },
             "chunking_strategy": "index_version_runtime",
             "retrieval_preset": "hybrid_dense_lexical_rerank_v1",
         },

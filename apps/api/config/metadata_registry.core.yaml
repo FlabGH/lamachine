@@ -1,0 +1,613 @@
+fields:
+  title:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Human-readable document title.
+  source_code:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: true
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: true
+    retrieval_filterable: true
+    values_owner: none
+    values: null
+    description: Short stable identifier for the source.
+  source_id:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Technical identifier of the registered source.
+  source_url:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Original document address when known.
+  author:
+    kind: core_business
+    type: free
+    scopes: [document]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Document author or authoring organization.
+  publication_date:
+    kind: core_business
+    type: date
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Date when the document was published.
+  collected_at:
+    kind: core_business
+    type: datetime
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Date when the document was collected or imported.
+  language:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values_owner: core
+    values: [fr, en, multi, unknown]
+    description: Primary language of the document.
+  is_primary_source:
+    kind: core_business
+    type: boolean
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Whether the document comes from its primary source.
+  citation_policy:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: core
+    values: [citable, non_citable, internal_only, to_verify]
+    description: Functional rule for citing the document.
+  rights_status:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: core
+    values: [open, copyrighted, internal, unknown]
+    description: Known usage rights status for the document.
+  freshness_status:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: core
+    values: [current, stale, archived, unknown]
+    description: Freshness state of the documentary information.
+  metadata_status:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: core
+    values: [draft, ai_proposed, human_validated, rejected]
+    description: Preparation or validation state of the metadata.
+  qualification_mode:
+    kind: core_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: core
+    values: [manual, ai, import]
+    description: Method used to qualify the metadata.
+  qualification_confidence:
+    kind: core_business
+    type: number
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Confidence level associated with the qualification.
+  qualification_rationale:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Concise justification for the qualification.
+  validated_by:
+    kind: core_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Functional identity of the validator.
+  validated_at:
+    kind: core_business
+    type: datetime
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Date and time when metadata was validated.
+  document_type:
+    kind: project_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: project
+    values: null
+    description: Functional category defined by the project.
+  theme_tags:
+    kind: project_business
+    type: list
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values_owner: project
+    values: null
+    description: Project-defined thematic labels.
+  data_tags:
+    kind: project_business
+    type: list
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values_owner: project
+    values: null
+    description: Data labels used to discover the corpus.
+  geographic_scope:
+    kind: project_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Geographic scope defined by the project.
+  temporal_scope:
+    kind: project_business
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Temporal scope defined by the project.
+  visibility_scope:
+    kind: access_control
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values_owner: core
+    values: [public, internal, restricted, organization]
+    description: Functional visibility scope of the document.
+  organization_id:
+    kind: access_control
+    type: free
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values_owner: none
+    values: null
+    description: Identifier of the organization linked to the document.
+  access_level:
+    kind: access_control
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values_owner: core
+    values: [open, authenticated, restricted, admin]
+    description: Functional access level associated with the document.
+  document_id:
+    kind: technical
+    type: free
+    scopes: [document, chunk]
+    required: true
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: true
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Technical identifier of the document.
+  chunk_id:
+    kind: technical
+    type: free
+    scopes: [chunk, retrieval_hit]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: true
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Technical identifier of the chunk.
+  chunk_index:
+    kind: technical
+    type: integer
+    scopes: [chunk]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Position of the chunk within the document.
+  parent_document_id:
+    kind: technical
+    type: free
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Identifier of the parent document of the chunk.
+  filename:
+    kind: technical
+    type: free
+    scopes: [document]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Name of the imported file.
+  mime_type:
+    kind: technical
+    type: free
+    scopes: [document]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: MIME type of the document.
+  content_hash:
+    kind: technical
+    type: free
+    scopes: [chunk]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Content fingerprint of the chunk.
+  document_version:
+    kind: technical
+    type: free
+    scopes: [document]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Functional version of the document when available.
+  ingestion_version:
+    kind: technical
+    type: free
+    scopes: [document, run]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Version of the ingestion process used.
+  chunking_version:
+    kind: technical
+    type: free
+    scopes: [chunk, run]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Version of the chunking mechanism used.
+  index_version:
+    kind: technical
+    type: free
+    scopes: [chunk, run, retrieval_hit]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Functional version of the index used.
+  vector_collection:
+    kind: technical
+    type: free
+    scopes: [chunk, run]
+    required: true
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Vector collection associated with the chunk or run.
+  embedding_provider:
+    kind: technical
+    type: free
+    scopes: [chunk, run, model_call]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Provider used to compute embeddings.
+  embedding_model:
+    kind: technical
+    type: free
+    scopes: [chunk, run, model_call]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Embedding model used.
+  embedding_dimension:
+    kind: technical
+    type: integer
+    scopes: [chunk, run, model_call]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Dimension of embedding vectors.
+  chunking_strategy:
+    kind: technical
+    type: free
+    scopes: [chunk, run]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Selected chunking strategy.
+  chunk_size:
+    kind: technical
+    type: integer
+    scopes: [chunk, run]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Target size of chunks.
+  chunk_overlap:
+    kind: technical
+    type: integer
+    scopes: [chunk, run]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Configured overlap between chunks.
+  token_count:
+    kind: technical
+    type: integer
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Estimated number of tokens in the chunk.
+  qdrant_point_id:
+    kind: technical
+    type: free
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: false
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Vector point identifier associated with the chunk.
+  page_start:
+    kind: technical
+    type: integer
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: First page covered by the chunk.
+  page_end:
+    kind: technical
+    type: integer
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Last page covered by the chunk.
+  section_title:
+    kind: technical
+    type: free
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Section title associated with the chunk.
+  heading_path:
+    kind: technical
+    type: list
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Hierarchical path of section headings.
+  section_level:
+    kind: technical
+    type: integer
+    scopes: [chunk]
+    required: false
+    propagate_to_chunks: false
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: false
+    values_owner: none
+    values: null
+    description: Hierarchical level of the section.

@@ -14,10 +14,17 @@ DEFAULT_PROJECT_CONFIG_PATH = API_ROOT / "config" / "project.yaml"
 PROJECT_CONFIG_PATH_ENV = "PROJECT_CONFIG_PATH"
 
 
+class MetadataRegistryConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    core: str
+    project: str
+
+
 class DocumentaryProjectConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    metadata_registry: str
+    metadata_registry: MetadataRegistryConfig
     chunking_strategy: str
     retrieval_preset: str
 

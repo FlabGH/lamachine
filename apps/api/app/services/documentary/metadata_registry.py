@@ -1,938 +1,237 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from enum import Enum
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
-from app.services.documentary.metadata_contract import (
-    ACCESS_LEVEL_VALUES,
-    CITATION_POLICY_VALUES,
-    DATA_TAG_VALUES,
-    FAMILLE_POLITIQUE_VALUES,
-    FRESHNESS_STATUS_VALUES,
-    LANGUAGE_VALUES,
-    MODE_QUALIFICATION_VALUES,
-    NIVEAU_CONFIANCE_VALUES,
-    POSITION_PROJET_VALUES,
-    RIGHTS_STATUS_VALUES,
-    ROLE_DOCUMENTAIRE_VALUES,
-    SERVICE_FAMILY_VALUES,
-    STATUT_METADONNEES_VALUES,
-    TYPE_DOCUMENT_VALUES,
-    USAGE_PROBATOIRE_VALUES,
-    VISIBILITY_SCOPE_VALUES,
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.services.project_config import get_project_config
+
+
+API_ROOT = Path(__file__).resolve().parents[3]
+
+
+class MetadataKind(str, Enum):
+    core_business = "core_business"
+    project_business = "project_business"
+    technical = "technical"
+    access_control = "access_control"
+    runtime = "runtime"
+    observability = "observability"
+
+
+class MetadataType(str, Enum):
+    enum = "enum"
+    free = "free"
+    boolean = "boolean"
+    number = "number"
+    integer = "integer"
+    date = "date"
+    datetime = "datetime"
+    object = "object"
+    list = "list"
+
+
+class ValuesOwner(str, Enum):
+    core = "core"
+    project = "project"
+    none = "none"
+
+
+class MetadataScope(str, Enum):
+    document = "document"
+    chunk = "chunk"
+    run = "run"
+    model_call = "model_call"
+    retrieval_hit = "retrieval_hit"
+
+
+class MetadataFieldDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: MetadataKind
+    type: MetadataType
+    scopes: list[MetadataScope] = Field(min_length=1)
+    required: bool
+    propagate_to_chunks: bool
+    propagate_to_qdrant: bool
+    qdrant_required: bool
+    retrieval_filterable: bool
+    values_owner: ValuesOwner
+    values: list[str] | None = None
+    description: str = Field(min_length=1)
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("description must not be empty")
+        return normalized
+
+    @field_validator("scopes")
+    @classmethod
+    def reject_duplicate_scopes(
+        cls,
+        scopes: list[MetadataScope],
+    ) -> list[MetadataScope]:
+        if len(scopes) != len(set(scopes)):
+            raise ValueError("scopes must not contain duplicates")
+        return scopes
+
+    @model_validator(mode="after")
+    def validate_values(self) -> "MetadataFieldDefinition":
+        if self.qdrant_required and not self.propagate_to_qdrant:
+            raise ValueError(
+                "qdrant_required fields must propagate_to_qdrant"
+            )
+        if self.type not in {MetadataType.enum, MetadataType.list} and self.values:
+            raise ValueError("values are only allowed for enum or list fields")
+        if self.values_owner is ValuesOwner.none and self.values is not None:
+            raise ValueError("values_owner none requires values to be null")
+        if self.values_owner is ValuesOwner.core and not self.values:
+            raise ValueError("values_owner core requires non-empty values")
+        if self.type is MetadataType.enum and self.values_owner is ValuesOwner.core:
+            return self
+        if self.type is MetadataType.enum and self.values_owner is ValuesOwner.none:
+            raise ValueError("enum fields require values_owner core or project")
+        return self
+
+
+class MetadataRegistry(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    fields: dict[str, MetadataFieldDefinition] = Field(min_length=1)
+
+    @field_validator("fields")
+    @classmethod
+    def validate_field_names(
+        cls,
+        fields: dict[str, MetadataFieldDefinition],
+    ) -> dict[str, MetadataFieldDefinition]:
+        for name in fields:
+            if not name or name.strip() != name:
+                raise ValueError("metadata field names must be non-empty and trimmed")
+        return fields
+
+
+class MetadataFieldOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    values: list[str] | None = Field(default=None, min_length=1)
+    description: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def require_change(self) -> "MetadataFieldOverride":
+        if self.values is None and self.description is None:
+            raise ValueError("project overrides must define values or description")
+        return self
+
+
+class ProjectMetadataRegistry(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    overrides: dict[str, MetadataFieldOverride] = Field(default_factory=dict)
+    fields: dict[str, MetadataFieldDefinition] = Field(default_factory=dict)
+
+
+class _DuplicateKeySafeLoader(yaml.SafeLoader):
+    pass
+
+
+def _construct_mapping(loader, node, deep=False):
+    mapping: dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError(f"Duplicate YAML key: {key}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_DuplicateKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_mapping,
 )
 
 
-ALLOWED_LEVELS = {
-    "document",
-    "chunk",
-    "index_version",
-    "retrieval_run",
-    "generation_run",
-    "output",
-}
-
-ALLOWED_STORAGES = {
-    "sql_column",
-    "jsonb",
-    "qdrant_payload",
-    "runtime",
-}
-
-ALLOWED_USES = {
-    "filtering",
-    "retrieval",
-    "generation",
-    "display",
-    "governance",
-    "audit",
-    "routing",
-    "evaluation",
-}
-
-ALLOWED_IMPLEMENTATION_STATUSES = {
-    "implemented",
-    "planned",
-    "partial",
-    "deprecated",
-}
-
-QDRANT_REQUIRED_METADATA = {
-    "chunk_id",
-    "document_id",
-    "source_code",
-    "index_version_id",
-    "role_documentaire",
-    "theme_tags",
-    "visibility_scope",
-    "organization_id",
-    "access_level",
-    "data_tags",
-    "service_family",
-    "service_ids",
-}
+def _resolve_registry_path(configured_path: str) -> Path:
+    path = Path(configured_path)
+    return path if path.is_absolute() else API_ROOT / path
 
 
-@dataclass(frozen=True)
-class MetadataRegistryEntry:
-    metadata: str
-    level: str
-    storage: tuple[str, ...]
-    uses: tuple[str, ...]
-    allowed_values: tuple[str, ...] | None = None
-    default_value: Any | None = None
-    propagate_to_chunk: bool = False
-    propagate_to_qdrant: bool = False
-    retrieval_filterable: bool = False
-    qdrant_required: bool = False
-    implementation_status: str = "implemented"
-    deprecated: bool = False
-    alias_of: str | None = None
-    qdrant_without_chunk_reason: str | None = None
-    description: str | None = None
+def _load_yaml(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as stream:
+        raw_registry = yaml.load(stream, Loader=_DuplicateKeySafeLoader)
+
+    if not isinstance(raw_registry, dict):
+        raise ValueError(f"Metadata registry must be a YAML object: {path}")
+    return raw_registry
 
 
-def _values(values: set[str]) -> tuple[str, ...]:
-    return tuple(sorted(values))
+def load_core_metadata_registry(path: Path) -> MetadataRegistry:
+    return MetadataRegistry.model_validate(_load_yaml(path))
 
 
-METADATA_REGISTRY: tuple[MetadataRegistryEntry, ...] = (
-    MetadataRegistryEntry(
-        "title",
-        "document",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("display", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "source_code",
-        "document",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("filtering", "retrieval", "display", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        qdrant_required=True,
-        description="Identifiant court et canonique de la source documentaire.",
-    ),
-    MetadataRegistryEntry(
-        "role_documentaire",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "retrieval", "display", "evaluation", "governance", "audit"),
-        allowed_values=_values(ROLE_DOCUMENTAIRE_VALUES),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        qdrant_required=True,
-        description="Role documentaire de la source dans le corpus et le retrieval.",
-    ),
-    MetadataRegistryEntry(
-        "famille_politique",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("display", "governance", "audit"),
-        allowed_values=_values(FAMILLE_POLITIQUE_VALUES),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "positionnement",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("display", "governance", "audit"),
-        allowed_values=_values(POSITION_PROJET_VALUES),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "niveau_confiance",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("display", "governance", "audit"),
-        allowed_values=_values(NIVEAU_CONFIANCE_VALUES),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "type_document",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "display", "governance", "audit"),
-        allowed_values=_values(TYPE_DOCUMENT_VALUES),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-        description="Nature fonctionnelle du document ingere.",
-    ),
-    MetadataRegistryEntry(
-        "usage_probatoire",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("display", "governance", "audit"),
-        allowed_values=_values(USAGE_PROBATOIRE_VALUES),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "statut_metadonnees",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "governance", "audit"),
-        allowed_values=_values(STATUT_METADONNEES_VALUES),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "mode_qualification",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("governance", "audit"),
-        allowed_values=_values(MODE_QUALIFICATION_VALUES),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "qualification_confidence",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("governance", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "qualification_rationale",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("governance", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "validated_by",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("governance", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "validated_at",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("governance", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "theme_tags",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "retrieval", "display", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        qdrant_required=True,
-        description="Tags thematiques libres utiles pour recherche, evaluation et affichage.",
-    ),
-    MetadataRegistryEntry(
-        "data_tags",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "routing", "display", "audit"),
-        allowed_values=_values(DATA_TAG_VALUES),
-        default_value=("corpus",),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        qdrant_required=True,
-        description="Categories de donnees mobilisees ou necessaires pour le document.",
-    ),
-    MetadataRegistryEntry(
-        "service_family",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "routing", "display", "audit"),
-        allowed_values=_values(SERVICE_FAMILY_VALUES),
-        default_value="transverse",
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        qdrant_required=True,
-        description="Famille de service LaMachine principalement concernee.",
-    ),
-    MetadataRegistryEntry(
-        "service_ids",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "routing", "display", "audit"),
-        default_value=(),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        qdrant_required=True,
-        description="Identifiants de services LaMachine concernes, par exemple I.1 ou IV.1.",
-    ),
-    MetadataRegistryEntry(
-        "visibility_scope",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "governance", "audit"),
-        allowed_values=_values(VISIBILITY_SCOPE_VALUES),
-        default_value="public",
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        qdrant_required=True,
-        description="Perimetre de visibilite documentaire prepare pour les silos et droits.",
-    ),
-    MetadataRegistryEntry(
-        "organization_id",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "governance", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        qdrant_required=True,
-        description="Identifiant optionnel de l'organisation proprietaire du document.",
-    ),
-    MetadataRegistryEntry(
-        "access_level",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "governance", "audit"),
-        allowed_values=_values(ACCESS_LEVEL_VALUES),
-        default_value="open",
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        qdrant_required=True,
-        description="Niveau d'acces fonctionnel requis pour consulter ou exploiter le document.",
-    ),
-    MetadataRegistryEntry(
-        "source_url",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("display", "generation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "publication_date",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "display", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "collected_at",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("display", "audit"),
-        default_value="current UTC datetime",
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "freshness_status",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "display", "audit"),
-        allowed_values=_values(FRESHNESS_STATUS_VALUES),
-        default_value="unknown",
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "language",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "display", "routing", "audit"),
-        allowed_values=_values(LANGUAGE_VALUES),
-        default_value="fr",
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        description="Langue principale du document.",
-    ),
-    MetadataRegistryEntry(
-        "geographic_scope",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "display", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "temporal_scope",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "display", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "is_primary_source",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "display", "governance", "audit"),
-        default_value=False,
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "citation_policy",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "generation", "governance", "audit"),
-        allowed_values=_values(CITATION_POLICY_VALUES),
-        default_value="a_verifier",
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "rights_status",
-        "document",
-        ("jsonb", "qdrant_payload"),
-        ("filtering", "generation", "governance", "audit"),
-        allowed_values=_values(RIGHTS_STATUS_VALUES),
-        default_value="unknown",
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "extraction",
-        "document",
-        ("jsonb",),
-        ("display", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "extracted_pages",
-        "document",
-        ("jsonb",),
-        ("display", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "extraction.status",
-        "document",
-        ("jsonb",),
-        ("display", "audit"),
-        allowed_values=("failed", "partial", "success"),
-    ),
-    MetadataRegistryEntry(
-        "extraction.ocr_used",
-        "document",
-        ("jsonb",),
-        ("display", "audit"),
-        default_value=False,
-    ),
-    MetadataRegistryEntry(
-        "extraction.page_count",
-        "document",
-        ("jsonb",),
-        ("display", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "extraction.layout_quality_status",
-        "document",
-        ("jsonb",),
-        ("display", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "extraction.errors",
-        "document",
-        ("jsonb",),
-        ("display", "audit"),
-        default_value=(),
-    ),
-    MetadataRegistryEntry(
-        "source_id",
-        "chunk",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("display", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "document_id",
-        "chunk",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("filtering", "retrieval", "display", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-        qdrant_required=True,
-    ),
-    MetadataRegistryEntry(
-        "parent_document_id",
-        "chunk",
-        ("jsonb", "qdrant_payload"),
-        ("display", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "document_title",
-        "chunk",
-        ("jsonb", "qdrant_payload"),
-        ("retrieval", "display", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "content_sha256",
-        "chunk",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("audit",),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "content_hash",
-        "chunk",
-        ("jsonb", "qdrant_payload"),
-        ("audit",),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "chunk_id",
-        "chunk",
-        ("sql_column", "qdrant_payload", "runtime"),
-        ("retrieval", "display", "generation", "evaluation", "audit"),
-        propagate_to_qdrant=True,
-        qdrant_required=True,
-        qdrant_without_chunk_reason=(
-            "chunk_id is added as the Qdrant point mapping key, not inherited "
-            "from document metadata."
-        ),
-    ),
-    MetadataRegistryEntry(
-        "chunk_index",
-        "chunk",
-        ("sql_column",),
-        ("display", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "page_start",
-        "chunk",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("display", "generation", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "page_end",
-        "chunk",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("display", "generation", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "section",
-        "chunk",
-        ("jsonb", "qdrant_payload"),
-        ("display", "audit"),
-        default_value="body",
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "section_title",
-        "chunk",
-        ("jsonb", "qdrant_payload"),
-        ("display", "generation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "heading_path",
-        "chunk",
-        ("jsonb", "qdrant_payload"),
-        ("display", "generation", "audit", "evaluation"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "section_level",
-        "chunk",
-        ("jsonb", "qdrant_payload"),
-        ("display", "audit", "evaluation"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "structural_chunking_status",
-        "chunk",
-        ("jsonb", "qdrant_payload"),
-        ("audit", "evaluation"),
-        allowed_values=("section_aware", "fallback_word_window"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "structural_chunking_warnings",
-        "chunk",
-        ("jsonb", "qdrant_payload"),
-        ("audit", "evaluation"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "token_count",
-        "chunk",
-        ("sql_column",),
-        ("audit",),
-    ),
-    MetadataRegistryEntry(
-        "qdrant_point_id",
-        "chunk",
-        ("sql_column",),
-        ("retrieval", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "index_version_id",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload", "runtime"),
-        ("filtering", "retrieval", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        retrieval_filterable=True,
-        implementation_status="partial",
-        qdrant_required=True,
-    ),
-    MetadataRegistryEntry(
-        "vector_collection",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload", "runtime"),
-        ("retrieval", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "embedding_provider",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "embedding_model",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "embedding_dimension",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "chunking_version",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("audit",),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "split_strategy",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("audit",),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "chunk_size",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("audit",),
-        default_value=450,
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "chunk_overlap",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("audit",),
-        default_value=80,
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "min_chunk_size",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("audit",),
-        default_value=80,
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "max_chunk_size",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("audit",),
-        default_value=650,
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "chunking_strategy",
-        "index_version",
-        ("sql_column", "jsonb", "qdrant_payload"),
-        ("audit",),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        deprecated=True,
-        alias_of="chunking_version",
-        implementation_status="deprecated",
-    ),
-    MetadataRegistryEntry(
-        "chunk_size_words",
-        "index_version",
-        ("jsonb", "qdrant_payload"),
-        ("audit",),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        deprecated=True,
-        alias_of="chunk_size",
-        implementation_status="deprecated",
-    ),
-    MetadataRegistryEntry(
-        "chunk_overlap_words",
-        "index_version",
-        ("jsonb", "qdrant_payload"),
-        ("audit",),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-        deprecated=True,
-        alias_of="chunk_overlap",
-        implementation_status="deprecated",
-    ),
-    MetadataRegistryEntry(
-        "ai_backend_preset",
-        "retrieval_run",
-        ("jsonb", "runtime"),
-        ("routing", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "embedding_model_call_id",
-        "retrieval_run",
-        ("jsonb", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "reranker_provider",
-        "retrieval_run",
-        ("jsonb", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "reranker_model",
-        "retrieval_run",
-        ("jsonb", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "rerank_model_call_id",
-        "retrieval_run",
-        ("jsonb", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "call_type",
-        "retrieval_run",
-        ("sql_column", "runtime"),
-        ("routing", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "provider",
-        "retrieval_run",
-        ("sql_column", "runtime"),
-        ("routing", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "model",
-        "retrieval_run",
-        ("sql_column", "runtime"),
-        ("routing", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "input_hash",
-        "retrieval_run",
-        ("sql_column",),
-        ("audit",),
-    ),
-    MetadataRegistryEntry(
-        "parameters",
-        "retrieval_run",
-        ("sql_column", "jsonb"),
-        ("audit",),
-    ),
-    MetadataRegistryEntry(
-        "response_metadata",
-        "retrieval_run",
-        ("sql_column", "jsonb"),
-        ("audit",),
-    ),
-    MetadataRegistryEntry(
-        "latency_ms",
-        "retrieval_run",
-        ("sql_column", "runtime"),
-        ("evaluation", "audit"),
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "run_id",
-        "retrieval_run",
-        ("sql_column", "runtime"),
-        ("retrieval", "generation", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "retrieval_run_id",
-        "generation_run",
-        ("jsonb", "runtime"),
-        ("generation", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "generation_run_id",
-        "generation_run",
-        ("sql_column", "runtime"),
-        ("generation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "model_call_id",
-        "retrieval_run",
-        ("sql_column", "jsonb", "qdrant_payload", "runtime"),
-        ("retrieval", "generation", "evaluation", "audit"),
-        propagate_to_chunk=True,
-        propagate_to_qdrant=True,
-    ),
-    MetadataRegistryEntry(
-        "prompt_version",
-        "generation_run",
-        ("sql_column", "jsonb", "runtime"),
-        ("generation", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "llm_provider",
-        "generation_run",
-        ("jsonb", "runtime"),
-        ("generation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "llm_model",
-        "generation_run",
-        ("jsonb", "runtime"),
-        ("generation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "llm_model_call_id",
-        "generation_run",
-        ("sql_column", "jsonb", "runtime"),
-        ("generation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "token_input",
-        "generation_run",
-        ("sql_column", "runtime"),
-        ("generation", "audit"),
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "token_output",
-        "generation_run",
-        ("sql_column", "runtime"),
-        ("generation", "audit"),
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "cost_estimate",
-        "generation_run",
-        ("sql_column", "runtime"),
-        ("generation", "audit"),
-        implementation_status="partial",
-    ),
-    MetadataRegistryEntry(
-        "rank_initial",
-        "retrieval_run",
-        ("sql_column", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "rank_final",
-        "retrieval_run",
-        ("sql_column", "runtime"),
-        ("retrieval", "generation", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "dense_score",
-        "retrieval_run",
-        ("sql_column", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "lexical_score",
-        "retrieval_run",
-        ("sql_column", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-    ),
-    MetadataRegistryEntry(
-        "rerank_score",
-        "retrieval_run",
-        ("sql_column", "runtime"),
-        ("retrieval", "evaluation", "audit"),
-    ),
-)
+def load_project_metadata_registry(path: Path) -> ProjectMetadataRegistry:
+    return ProjectMetadataRegistry.model_validate(_load_yaml(path))
 
 
-METADATA_REGISTRY_BY_NAME = {
-    entry.metadata: entry
-    for entry in METADATA_REGISTRY
-}
+def merge_metadata_registries(
+    core_registry: MetadataRegistry,
+    project_registry: ProjectMetadataRegistry,
+) -> MetadataRegistry:
+    fields = dict(core_registry.fields)
+
+    for name, override in project_registry.overrides.items():
+        core_field = fields.get(name)
+        if core_field is None:
+            raise ValueError(f"Project override targets unknown core field: {name}")
+        updates = {}
+        if override.values is not None and core_field.values_owner is not ValuesOwner.project:
+            raise ValueError(f"Core field does not allow project values: {name}")
+        if override.values is not None:
+            updates["values"] = override.values
+        if override.description is not None:
+            updates["description"] = override.description
+        fields[name] = core_field.model_copy(update=updates)
+
+    for name, project_field in project_registry.fields.items():
+        if name in fields:
+            raise ValueError(f"Project field conflicts with core field: {name}")
+        if project_field.kind is not MetadataKind.project_business:
+            raise ValueError("Project fields must use kind project_business")
+        if project_field.values_owner is not ValuesOwner.project:
+            raise ValueError("Project fields must use values_owner project")
+        if project_field.type is MetadataType.enum and not project_field.values:
+            raise ValueError("Project enum fields require non-empty values")
+        fields[name] = project_field
+
+    return MetadataRegistry(fields=fields)
 
 
-EXPORT_COLUMNS = (
-    "Metadata",
-    "level",
-    "storage",
-    "uses",
-    "implementation_status",
-    "allowed_values",
-    "default_value",
-    "propagate_to_chunk",
-    "propagate_to_qdrant",
-    "retrieval_filterable",
-    "qdrant_required",
-)
+def load_metadata_registry(
+    core_path: Path,
+    project_path: Path,
+) -> MetadataRegistry:
+    return merge_metadata_registries(
+        load_core_metadata_registry(core_path),
+        load_project_metadata_registry(project_path),
+    )
+
+
+def _configured_registry_paths() -> tuple[Path, Path]:
+    config = get_project_config().documentary.metadata_registry
+    return (
+        _resolve_registry_path(config.core),
+        _resolve_registry_path(config.project),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_metadata_registry() -> MetadataRegistry:
+    core_path, project_path = _configured_registry_paths()
+    return load_metadata_registry(core_path, project_path)
