@@ -65,7 +65,8 @@ def test_different_chunking_configs_produce_different_chunks():
 
     assert len(large_chunks) != len(small_chunks)
     assert large_chunks[0].metadata["chunking_version"] == "word_window_v1"
-    assert small_chunks[0].metadata["split_strategy"] == "word_window"
+    assert small_chunks[0].metadata["chunking_strategy"] == "word_window"
+    assert "split_strategy" not in small_chunks[0].metadata
 
 
 def test_chunking_preserves_page_range_and_section_title():
@@ -147,7 +148,6 @@ def test_structural_chunking_detects_markdown_heading_path_and_pages():
         if chunk.metadata.get("section_title")
         == "Mettre l'intelligence artificielle au service du bien commun"
     )
-    assert target.metadata["structural_chunking_status"] == "section_aware"
     assert target.metadata["heading_path"] == [
         "Chapitre 1",
         "Mettre l'intelligence artificielle au service du bien commun",
@@ -171,10 +171,8 @@ def test_structural_chunking_falls_back_without_usable_structure():
     )
 
     assert chunks
-    assert chunks[0].metadata["structural_chunking_status"] == "fallback_word_window"
-    assert chunks[0].metadata["structural_chunking_warnings"] == [
-        "insufficient_structure"
-    ]
+    assert "structural_chunking_status" not in chunks[0].metadata
+    assert "structural_chunking_warnings" not in chunks[0].metadata
 
 
 def test_structural_chunking_rejects_noisy_heading():

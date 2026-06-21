@@ -122,10 +122,10 @@ def detect_section_title(text: str) -> str | None:
 
 def _base_chunk_metadata(chunking_config: ChunkingConfig) -> dict:
     return {
-        **chunking_config.metadata(),
-        "chunking_strategy": chunking_config.chunking_version,
-        "chunk_size_words": chunking_config.chunk_size,
-        "chunk_overlap_words": chunking_config.chunk_overlap,
+        "chunking_version": chunking_config.chunking_version,
+        "chunking_strategy": chunking_config.split_strategy,
+        "chunk_size": chunking_config.chunk_size,
+        "chunk_overlap": chunking_config.chunk_overlap,
     }
 
 
@@ -323,10 +323,6 @@ def _format_structural_section_text(section: _StructuralSection) -> str:
 def _chunk_section_aware(text: str, *, chunking_config: ChunkingConfig) -> list[TextChunk]:
     sections, warnings = _parse_structural_sections(text)
     if warnings:
-        fallback_metadata = {
-            "structural_chunking_status": "fallback_word_window",
-            "structural_chunking_warnings": warnings,
-        }
         return _chunk_words(
             text,
             chunking_config=ChunkingConfig(
@@ -337,7 +333,6 @@ def _chunk_section_aware(text: str, *, chunking_config: ChunkingConfig) -> list[
                 max_chunk_size=chunking_config.max_chunk_size,
                 chunking_version=chunking_config.chunking_version,
             ),
-            extra_metadata=fallback_metadata,
         )
 
     chunks: list[TextChunk] = []
@@ -347,10 +342,13 @@ def _chunk_section_aware(text: str, *, chunking_config: ChunkingConfig) -> list[
         page_start = min(section.pages) if section.pages else detect_page_range(content)[0]
         page_end = max(section.pages) if section.pages else detect_page_range(content)[1]
         section_metadata = {
-            "structural_chunking_status": "section_aware",
-            "section_title": section.title,
-            "heading_path": section.heading_path,
-            "section_level": section.section_level,
+            key: value
+            for key, value in {
+                "section_title": section.title,
+                "heading_path": section.heading_path,
+                "section_level": section.section_level,
+            }.items()
+            if value not in (None, [])
         }
         section_chunks = _chunk_words(
             content,

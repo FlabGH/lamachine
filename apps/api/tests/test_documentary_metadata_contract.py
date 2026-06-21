@@ -4,6 +4,7 @@ from uuid import UUID
 import pytest
 
 from app.services.documentary.metadata_contract import (
+    build_canonical_chunk_metadata,
     build_chunk_metadata,
     build_qdrant_payload,
     missing_chunk_metadata_keys,
@@ -76,6 +77,35 @@ def test_build_chunk_metadata_serializes_ids_and_keeps_pages():
     assert metadata["chunking_strategy"] == "word_window_v1"
     assert metadata["chunking_version"] == "word_window_v1"
     assert metadata["split_strategy"] == "word_window"
+
+
+def test_build_canonical_chunk_metadata_uses_registry_field_names():
+    metadata = build_canonical_chunk_metadata(
+        source_id=SOURCE_ID,
+        document_id=DOCUMENT_ID,
+        chunk_id=UUID("00000000-0000-0000-0000-000000000004"),
+        title="Document fictif",
+        source_code="source_fictive",
+        content_hash="abc123",
+        index_version=INDEX_VERSION_ID,
+        vector_collection="test_collection",
+        chunk_index=0,
+        token_count=10,
+        chunking_version="word_window_v1",
+        chunking_strategy="word_window",
+        chunk_size=450,
+        chunk_overlap=80,
+        page_start=1,
+        page_end=2,
+    )
+
+    assert metadata["title"] == "Document fictif"
+    assert metadata["content_hash"] == "abc123"
+    assert metadata["index_version"] == str(INDEX_VERSION_ID)
+    assert metadata["chunk_id"] == "00000000-0000-0000-0000-000000000004"
+    assert "document_title" not in metadata
+    assert "content_sha256" not in metadata
+    assert "index_version_id" not in metadata
 
 
 def test_build_chunk_metadata_adds_body_section_when_no_page_is_available():
