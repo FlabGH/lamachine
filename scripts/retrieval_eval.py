@@ -16,15 +16,15 @@ from uuid import UUID, uuid4
 import yaml
 
 
-REPO_ROOT = Path(os.getenv("PHASE3_REPO_ROOT", Path(__file__).resolve().parents[1]))
-API_ROOT = Path(os.getenv("PHASE3_API_ROOT", REPO_ROOT / "apps" / "api"))
+REPO_ROOT = Path(os.getenv("LAPYTHIE_REPO_ROOT", Path(__file__).resolve().parents[1]))
+API_ROOT = Path(os.getenv("LAPYTHIE_API_ROOT", REPO_ROOT / "apps" / "api"))
 DEFAULT_MANIFEST = REPO_ROOT / "corpus" / "poc_ia" / "manifest.yaml"
 DEFAULT_FILES_DIR = REPO_ROOT / "corpus" / "poc_ia" / "files"
 DEFAULT_QUERY_CANDIDATES = [
     REPO_ROOT / "corpus" / "poc_ia" / "evaluation_queries.yaml",
     REPO_ROOT / "corpus" / "evaluation_queries.yaml",
 ]
-DEFAULT_REPORT = REPO_ROOT / "artifacts" / "phase3_retrieval_eval_report.md"
+DEFAULT_REPORT = REPO_ROOT / "artifacts" / "retrieval_eval_report.md"
 
 
 @dataclass(frozen=True)
@@ -296,7 +296,7 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
                 VALUES (%s, %s, 'pdf', %s)
                 RETURNING id
                 """,
-                (source_id, metadata["source_code"], "phase3_step7_manifest"),
+                (source_id, metadata["source_code"], "retrieval_eval_manifest"),
             )
             source_id = cur.fetchone()["id"]
 
@@ -612,7 +612,7 @@ def _write_report(
     average_latency_ms = _average([float(item["latency_ms"]) for item in query_reports])
 
     lines = [
-        "# Phase 3 Retrieval Evaluation",
+        "# Retrieval Evaluation",
         "",
         f"Generated at: `{datetime.now(UTC).isoformat()}`",
         f"Manifest: `{manifest_path.relative_to(REPO_ROOT)}`",
@@ -735,8 +735,8 @@ async def _run(args: argparse.Namespace) -> Path:
     queries = _load_queries(queries_path)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    index_name = args.index_name or f"phase3-step7-eval-{timestamp}"
-    vector_collection = args.vector_collection or f"phase3_step7_eval_{timestamp}"
+    index_name = args.index_name or f"retrieval-eval-{timestamp}"
+    vector_collection = args.vector_collection or f"retrieval_eval_{timestamp}"
     chunking_config = _chunking_config_from_args(args)
 
     if args.reuse_index_version_id:
@@ -795,7 +795,7 @@ async def _run(args: argparse.Namespace) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run Phase 3 retrieval evaluation.")
+    parser = argparse.ArgumentParser(description="Run retrieval evaluation.")
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST.relative_to(REPO_ROOT)))
     parser.add_argument("--queries", default=None)
     parser.add_argument("--files-dir", default=str(DEFAULT_FILES_DIR.relative_to(REPO_ROOT)))

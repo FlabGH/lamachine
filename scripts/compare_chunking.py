@@ -17,7 +17,7 @@ METRIC_RE = re.compile(r"^- (?P<name>[^:]+): (?P<value>.+)$")
 def _run_eval(report_path: Path, *, structural: bool, args: argparse.Namespace) -> None:
     command = [
         sys.executable,
-        str(REPO_ROOT / "scripts" / "phase3_retrieval_eval.py"),
+        str(REPO_ROOT / "scripts" / "retrieval_eval.py"),
         "--report",
         str(report_path.relative_to(REPO_ROOT)),
         "--top-k",
@@ -35,9 +35,9 @@ def _run_eval(report_path: Path, *, structural: bool, args: argparse.Namespace) 
         command.extend(
             [
                 "--index-name",
-                f"phase3-step15-structural-eval-{args.timestamp}",
+                f"chunking-structural-eval-{args.timestamp}",
                 "--vector-collection",
-                f"phase3_step15_structural_eval_{args.timestamp}",
+                f"chunking_structural_eval_{args.timestamp}",
                 "--split-strategy",
                 "section_aware_window",
                 "--chunking-version",
@@ -48,9 +48,9 @@ def _run_eval(report_path: Path, *, structural: bool, args: argparse.Namespace) 
         command.extend(
             [
                 "--index-name",
-                f"phase3-step15-baseline-eval-{args.timestamp}",
+                f"chunking-baseline-eval-{args.timestamp}",
                 "--vector-collection",
-                f"phase3_step15_baseline_eval_{args.timestamp}",
+                f"chunking_baseline_eval_{args.timestamp}",
             ]
         )
 
@@ -69,10 +69,10 @@ def _parse_report(report_path: Path) -> dict[str, str]:
         if metric and current_query is None:
             metrics[metric.group("name")] = metric.group("value")
         if current_query and (
-            "Hit source_code @" in line or "Hit role_documentaire @" in line
+            "Hit source_code @" in line
         ) and line.endswith("no"):
             failed_queries.add(current_query)
-    metrics["Failed source/role queries"] = ", ".join(sorted(failed_queries)) or "none"
+    metrics["Failed source queries"] = ", ".join(sorted(failed_queries)) or "none"
     return metrics
 
 
@@ -86,7 +86,7 @@ def _write_comparison(
     structural = _parse_report(structural_report)
     metric_names = sorted(set(baseline) | set(structural))
     lines = [
-        "# Phase 3 Chunking Comparison",
+        "# Chunking Comparison",
         "",
         f"Generated at: `{datetime.now(UTC).isoformat()}`",
         f"Baseline report: `{baseline_report.relative_to(REPO_ROOT)}`",
@@ -113,9 +113,9 @@ def _write_comparison(
             "",
             "## Interpretation checklist",
             "",
-            "- Check source/role recall and MRR before considering promotion.",
+            "- Check source recall and MRR before considering promotion.",
             "- Check total chunks and page coverage for cost and citation quality.",
-            "- Inspect failed source/role queries before replacing the active index.",
+            "- Inspect failed source queries before replacing the active index.",
             "- Do not promote this index automatically; use the internal promotion endpoint after validation.",
         ]
     )
@@ -126,7 +126,7 @@ def _write_comparison(
 def main() -> None:
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     parser = argparse.ArgumentParser(
-        description="Compare Phase 3 baseline and structural chunking reports."
+        description="Compare baseline and structural chunking reports."
     )
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--queries", default=None)
@@ -139,17 +139,17 @@ def main() -> None:
     parser.add_argument("--skip-run", action="store_true")
     parser.add_argument(
         "--report",
-        default=f"artifacts/phase3_chunking_comparison_{timestamp}.md",
+        default=f"artifacts/chunking_comparison_{timestamp}.md",
     )
     args = parser.parse_args()
 
     baseline_report = Path(
         args.baseline_report
-        or f"artifacts/phase3_chunking_baseline_{args.timestamp}.md"
+        or f"artifacts/chunking_baseline_{args.timestamp}.md"
     )
     structural_report = Path(
         args.structural_report
-        or f"artifacts/phase3_chunking_structural_{args.timestamp}.md"
+        or f"artifacts/chunking_structural_{args.timestamp}.md"
     )
     output_report = Path(args.report)
     if not baseline_report.is_absolute():

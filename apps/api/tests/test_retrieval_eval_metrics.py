@@ -4,8 +4,8 @@ from pathlib import Path
 
 
 def _load_eval_module():
-    script_path = Path(__file__).resolve().parents[3] / "scripts" / "phase3_retrieval_eval.py"
-    spec = importlib.util.spec_from_file_location("phase3_retrieval_eval", script_path)
+    script_path = Path(__file__).resolve().parents[3] / "scripts" / "retrieval_eval.py"
+    spec = importlib.util.spec_from_file_location("retrieval_eval", script_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules[spec.name] = module
@@ -52,3 +52,24 @@ def test_average_returns_zero_for_empty_values():
 
     assert module._average([]) == 0.0
     assert module._average([10.0, 20.0]) == 15.0
+
+
+def test_load_queries_uses_canonical_expectations_without_roles(tmp_path):
+    module = _load_eval_module()
+    queries_path = tmp_path / "queries.yaml"
+    queries_path.write_text(
+        """
+queries:
+  - id: source_only
+    query: Find the source
+    expected_source_codes: [example]
+    expected_theme_tags: [documentation]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    queries = module._load_queries(queries_path)
+
+    assert queries[0].expected_source_codes == {"example"}
+    assert queries[0].expected_theme_tags == {"documentation"}
+    assert not hasattr(queries[0], "expected_roles")
