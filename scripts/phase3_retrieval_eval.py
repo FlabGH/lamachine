@@ -34,7 +34,6 @@ class QuerySpec:
     intent: str
     expected_source_codes: set[str]
     expected_document_ids: set[str]
-    expected_roles: set[str]
     expected_theme_tags: set[str]
     expected_pages: set[int]
 
@@ -157,7 +156,6 @@ def _load_queries(path: Path) -> list[QuerySpec]:
                 intent=str(item.get("intent", "")),
                 expected_source_codes={str(v).lower() for v in item.get("expected_source_codes", [])},
                 expected_document_ids={str(v) for v in item.get("expected_document_ids", [])},
-                expected_roles={str(v).lower() for v in item.get("expected_roles", [])},
                 expected_theme_tags={str(v) for v in item.get("expected_theme_tags", [])},
                 expected_pages=_normalize_expected_pages(item.get("expected_pages", [])),
             )
@@ -523,7 +521,6 @@ async def _run_query(
                 "chunk_id": str(hit.chunk_id),
                 "document_id": str(hit.document_id),
                 "source_code": metadata.get("source_code"),
-                "role_documentaire": metadata.get("role_documentaire"),
                 "theme_tags": theme_tags,
                 "page_start": metadata.get("page_start"),
                 "page_end": metadata.get("page_end"),
@@ -541,7 +538,6 @@ async def _run_query(
             if query.expected_document_ids
             else _recall_at(results, "source_code", query.expected_source_codes, top_k)
         ),
-        "role_hit": _recall_at(results, "role_documentaire", query.expected_roles, top_k),
         "page_hit": _page_hit_at(results, query.expected_pages, top_k),
         "source_mrr": _reciprocal_rank(results, "source_code", query.expected_source_codes, top_k),
         "document_mrr": (
@@ -549,7 +545,6 @@ async def _run_query(
             if query.expected_document_ids
             else _reciprocal_rank(results, "source_code", query.expected_source_codes, top_k)
         ),
-        "role_mrr": _reciprocal_rank(results, "role_documentaire", query.expected_roles, top_k),
         "page_coverage_rate": _page_coverage_rate(results, top_k),
         "latency_ms": latency_ms,
     }
@@ -568,9 +563,6 @@ def _chunk_quality_metrics(index_version_id: UUID) -> dict[str, float]:
                         WHERE COALESCE(metadata->>'source_code', '') = ''
                     ) AS missing_source_code,
                     COUNT(*) FILTER (
-                        WHERE COALESCE(metadata->>'role_documentaire', '') = ''
-                    ) AS missing_role_documentaire,
-                    COUNT(*) FILTER (
                         WHERE page_start IS NULL OR page_end IS NULL
                     ) AS missing_page_range
                 FROM document_chunks
@@ -585,14 +577,12 @@ def _chunk_quality_metrics(index_version_id: UUID) -> dict[str, float]:
         return {
             "total_chunks": 0,
             "missing_source_code_rate": 0.0,
-            "missing_role_documentaire_rate": 0.0,
             "missing_page_range_rate": 0.0,
         }
 
     return {
         "total_chunks": total,
         "missing_source_code_rate": int(row["missing_source_code"]) / total,
-        "missing_role_documentaire_rate": int(row["missing_role_documentaire"]) / total,
         "missing_page_range_rate": int(row["missing_page_range"]) / total,
     }
 
@@ -613,11 +603,9 @@ def _write_report(
     query_count = len(query_reports)
     source_recall = sum(1 for item in query_reports if item["source_hit"]) / query_count
     document_recall = sum(1 for item in query_reports if item["document_hit"]) / query_count
-    role_recall = sum(1 for item in query_reports if item["role_hit"]) / query_count
     page_recall = sum(1 for item in query_reports if item["page_hit"]) / query_count
     source_mrr = sum(float(item["source_mrr"]) for item in query_reports) / query_count
     document_mrr = sum(float(item["document_mrr"]) for item in query_reports) / query_count
-    role_mrr = sum(float(item["role_mrr"]) for item in query_reports) / query_count
     average_page_coverage = _average(
         [float(item["page_coverage_rate"]) for item in query_reports]
     )
@@ -638,16 +626,13 @@ def _write_report(
         "",
         f"- Recall@{top_k} source_code: {source_recall:.3f}",
         f"- Recall@{top_k} document: {document_recall:.3f}",
-        f"- Recall@{top_k} role_documentaire: {role_recall:.3f}",
         f"- Recall@{top_k} page: {page_recall:.3f}",
         f"- MRR source_code: {source_mrr:.3f}",
         f"- MRR document: {document_mrr:.3f}",
-        f"- MRR role_documentaire: {role_mrr:.3f}",
         f"- Page coverage@{top_k}: {average_page_coverage:.3f}",
         f"- Latence moyenne recherche: {average_latency_ms:.1f} ms",
         f"- Total chunks: {int(chunk_metrics['total_chunks'])}",
         f"- Chunks sans source_code: {chunk_metrics['missing_source_code_rate']:.3f}",
-        f"- Chunks sans role_documentaire: {chunk_metrics['missing_role_documentaire_rate']:.3f}",
         f"- Chunks sans page_start/page_end: {chunk_metrics['missing_page_range_rate']:.3f}",
         "",
         "## Query Results",
@@ -664,28 +649,24 @@ def _write_report(
                 f"- Intent: `{query.intent}`",
                 f"- Expected source_codes: `{', '.join(sorted(query.expected_source_codes))}`",
                 f"- Expected document_ids: `{', '.join(sorted(query.expected_document_ids))}`",
-                f"- Expected roles: `{', '.join(sorted(query.expected_roles))}`",
                 f"- Expected theme_tags: `{', '.join(sorted(query.expected_theme_tags))}`",
                 f"- Expected pages: `{', '.join(str(page) for page in sorted(query.expected_pages))}`",
                 f"- Hit source_code @{top_k}: {'yes' if item['source_hit'] else 'no'}",
                 f"- Hit document @{top_k}: {'yes' if item['document_hit'] else 'no'}",
-                f"- Hit role_documentaire @{top_k}: {'yes' if item['role_hit'] else 'no'}",
                 f"- Hit page @{top_k}: {'yes' if item['page_hit'] else 'no'}",
                 f"- Page coverage @{top_k}: {item['page_coverage_rate']:.3f}",
                 f"- Search latency: {item['latency_ms']:.1f} ms",
                 "",
-                "| rank | initial | score | dense | lexical | rerank | source_code | role_documentaire | theme_tags | pages | document_id | extrait | commentaire |",
-                "|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|---|",
+                "| rank | initial | score | dense | lexical | rerank | source_code | theme_tags | pages | document_id | extrait | commentaire |",
+                "|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|",
             ]
         )
 
         for result in item["results"]:
             source_hit = result["source_code"] in query.expected_source_codes
-            role_hit = result["role_documentaire"] in query.expected_roles
             theme_hit = bool(set(result["theme_tags"]) & query.expected_theme_tags)
             comment = (
                 f"source={'yes' if source_hit else 'no'}; "
-                f"role={'yes' if role_hit else 'no'}; "
                 f"theme={'yes' if theme_hit else 'no'}"
             )
             pages = ""
@@ -718,7 +699,6 @@ def _write_report(
                             else result["rerank_score"]
                         ),
                         _markdown_escape(result["source_code"]),
-                        _markdown_escape(result["role_documentaire"]),
                         _markdown_escape(", ".join(result["theme_tags"])),
                         _markdown_escape(pages),
                         _markdown_escape(result["document_id"]),
