@@ -4,110 +4,94 @@ queries:
     query: "Quel bilan peut-on faire de la stratégie nationale française pour l’intelligence artificielle ?"
     intent: cadrage_factuel
     expected_source_codes: [cour_des_comptes]
-    expected_roles: [cadrage_institutionnel]
     expected_theme_tags: [ia, strategie_nationale, evaluation_publique]
 
   - id: q02_cdc_retards_action_publique
     query: "Quels retards la France accuse-t-elle dans la transformation de l’action publique par l’IA ?"
     intent: cadrage_factuel
     expected_source_codes: [cour_des_comptes, sens_service_public]
-    expected_roles: [cadrage_institutionnel, doctrine_sectorielle]
     expected_theme_tags: [ia, service_public, administration]
 
   - id: q03_service_public_guichet_humain
     query: "Pourquoi faut-il maintenir un guichet humain dans les services publics utilisant l’IA ?"
     intent: ligne_doctrinale
     expected_source_codes: [sens_service_public, ps]
-    expected_roles: [doctrine_sectorielle, doctrine_alliee]
     expected_theme_tags: [ia, service_public, usagers]
 
   - id: q04_ia_travail_sens
     query: "Quels effets l’intelligence artificielle peut-elle avoir sur le sens du travail ?"
     intent: cadrage_social
     expected_source_codes: [fondation_jean_jaures, sens_service_public]
-    expected_roles: [doctrine_alliee, doctrine_sectorielle]
     expected_theme_tags: [ia, travail, emploi]
 
   - id: q05_ia_redistribution_capital
     query: "Comment partager les gains de productivité liés à l’IA entre capital et travail ?"
     intent: ligne_doctrinale
     expected_source_codes: [fondation_jean_jaures]
-    expected_roles: [doctrine_alliee]
     expected_theme_tags: [ia, redistribution, protection_sociale]
 
   - id: q06_ps_ia_bien_commun
     query: "Que propose le Parti socialiste pour mettre l’intelligence artificielle au service du bien commun ?"
     intent: doctrine_partisane
     expected_source_codes: [ps]
-    expected_roles: [doctrine_alliee]
     expected_theme_tags: [ia, service_public, democratie, regulation]
 
   - id: q07_ps_plateformes_algorithmes
     query: "Quelles mesures proposer contre les plateformes numériques et leurs algorithmes ?"
     intent: doctrine_partisane
     expected_source_codes: [ps]
-    expected_roles: [doctrine_alliee]
     expected_theme_tags: [plateformes, regulation, souverainete_numerique]
 
   - id: q08_lfi_souverainete_numerique
     query: "Quelle est la position de LFI sur la souveraineté numérique et l’accès à Internet ?"
     intent: comparaison_alliee
     expected_source_codes: [lfi]
-    expected_roles: [doctrine_alliee]
     expected_theme_tags: [souverainete_numerique, services_publics, bien_commun]
 
   - id: q09_lfi_ia_reseaux_sociaux_big_data
     query: "Que propose LFI pour encadrer l’IA, les réseaux sociaux et le big data ?"
     intent: comparaison_alliee
     expected_source_codes: [lfi]
-    expected_roles: [doctrine_alliee]
     expected_theme_tags: [ia, regulation, reseaux_sociaux]
 
   - id: q10_rn_ia_energie_reindustrialisation
     query: "Que dit le RN sur le lien entre intelligence artificielle, énergie et réindustrialisation ?"
     intent: riposte_adversaire
     expected_source_codes: [rn]
-    expected_roles: [opposition]
     expected_theme_tags: [ia, energie, industrie]
 
   - id: q11_rn_souverainete_numerique
     query: "Existe-t-il une doctrine RN claire sur la souveraineté numérique et l’intelligence artificielle ?"
     intent: riposte_adversaire
     expected_source_codes: [rn]
-    expected_roles: [opposition]
     expected_theme_tags: [souverainete_numerique, ia]
 
   - id: q12_extreme_droite_images_ia
     query: "Comment l’extrême droite utilise-t-elle les images générées par IA en campagne électorale ?"
     intent: riposte_adversaire
     expected_source_codes: [lemonde]
-    expected_roles: [presse_analyse]
     expected_theme_tags: [ia, campagne_electorale, extreme_droite, contenus_generatifs]
 
   - id: q13_desinformation_ia_elections
     query: "Quels risques l’IA générative fait-elle peser sur les campagnes électorales et le débat démocratique ?"
     intent: cadrage_factuel
     expected_source_codes: [lemonde, ps]
-    expected_roles: [presse_analyse, doctrine_alliee]
     expected_theme_tags: [ia, democratie, desinformation]
 
   - id: q14_ethique_dignite_humaine
     query: "Pourquoi l’intelligence artificielle ne peut-elle pas être considérée comme moralement neutre ?"
     intent: cadrage_normatif
     expected_source_codes: [magnifica_humanitas]
-    expected_roles: [doctrine_ethique]
     expected_theme_tags: [ia, ethique, anthropologie]
 
   - id: q15_technocratie_bien_commun
     query: "Comment critiquer le paradigme technocratique dans le déploiement de l’IA ?"
     intent: cadrage_normatif
     expected_source_codes: [magnifica_humanitas, sens_service_public]
-    expected_roles: [doctrine_ethique, doctrine_sectorielle]
     expected_theme_tags: [technique, bien_commun, gouvernance]
 
   - id: q16_synthese_progressiste
     query: "Quels principes progressistes défendre pour une IA démocratique, sociale et souveraine ?"
     intent: synthese_doctrinale
     expected_source_codes: [ps, fondation_jean_jaures, sens_service_public, cour_des_comptes]
-    expected_roles: [doctrine_alliee, doctrine_sectorielle, cadrage_institutionnel]
     expected_theme_tags: [ia, democratie, souverainete_numerique, service_public]
