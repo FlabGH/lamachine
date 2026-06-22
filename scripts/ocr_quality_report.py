@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(os.getenv("PHASE3_REPO_ROOT", Path(__file__).resolve().parents[1]))
-API_ROOT = Path(os.getenv("PHASE3_API_ROOT", REPO_ROOT / "apps" / "api"))
-DEFAULT_REPORT = REPO_ROOT / "artifacts" / "phase3_ocr_quality_report.md"
-DEFAULT_JSON_REPORT = REPO_ROOT / "artifacts" / "phase3_ocr_quality_report.json"
+REPO_ROOT = Path(os.getenv("LAPYTHIE_REPO_ROOT", Path(__file__).resolve().parents[1]))
+API_ROOT = Path(os.getenv("LAPYTHIE_API_ROOT", REPO_ROOT / "apps" / "api"))
+DEFAULT_REPORT = REPO_ROOT / "artifacts" / "ocr_quality_report.md"
+DEFAULT_JSON_REPORT = REPO_ROOT / "artifacts" / "ocr_quality_report.json"
 
 
 @dataclass(frozen=True)
@@ -186,7 +186,7 @@ def _write_reports(
     )
 
     lines = [
-        "# Phase 3 OCR Quality Report",
+        "# OCR Quality Report",
         "",
         f"Generated at: `{payload['generated_at']}`",
         "",
@@ -227,7 +227,7 @@ def _write_reports(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Write Phase 3 OCR quality report.")
+    parser = argparse.ArgumentParser(description="Write OCR quality report.")
     parser.add_argument("--report", default=str(DEFAULT_REPORT.relative_to(REPO_ROOT)))
     parser.add_argument(
         "--json-report",
