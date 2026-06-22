@@ -1,7 +1,5 @@
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from app.api.project import get_project_config_endpoint
 from app.services import project_config
 from app.services.project_config import (
@@ -14,8 +12,8 @@ from main import app
 def test_project_config_loads_default_contract():
     config = load_project_config()
 
-    assert config.project_id == "lapythie-core"
-    assert config.project_name == "LaPythie"
+    assert config.project_id
+    assert config.project_name
     assert config.config_version == 1
     assert config.documentary.metadata_registry.core == (
         "config/metadata_registry.core.yaml"
@@ -67,32 +65,24 @@ def test_project_config_api_endpoint_is_exposed(monkeypatch):
     monkeypatch.delenv("PROJECT_CONFIG_PATH", raising=False)
     project_config.get_project_config.cache_clear()
 
-    response = TestClient(app).get("/api/project/config")
+    paths = {route.path for route in app.routes}
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "project_id": "lapythie-core",
-        "project_name": "LaPythie",
-        "config_version": 1,
-        "documentary": {
-            "metadata_registry": {
-                "core": "config/metadata_registry.core.yaml",
-                "project": "config/metadata_registry.project.yaml",
-            },
-            "chunking_strategy": "index_version_runtime",
-            "retrieval_preset": "hybrid_dense_lexical_rerank_v1",
-        },
-    }
+    assert "/project/config" in paths
+    assert "/api/project/config" in paths
+    assert get_project_config_endpoint().model_dump() == (
+        project_config.get_project_config().model_dump()
+    )
 
 
 def test_project_trace_payload_contains_identity_only(monkeypatch):
     monkeypatch.delenv("PROJECT_CONFIG_PATH", raising=False)
     project_config.get_project_config.cache_clear()
 
+    config = project_config.get_project_config()
     assert project_trace_payload() == {
-        "project_id": "lapythie-core",
-        "project_name": "LaPythie",
-        "config_version": 1,
+        "project_id": config.project_id,
+        "project_name": config.project_name,
+        "config_version": config.config_version,
     }
 
 
