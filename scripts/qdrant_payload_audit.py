@@ -12,25 +12,10 @@ from typing import Any
 from uuid import UUID
 
 
-REPO_ROOT = Path(os.getenv("PHASE3_REPO_ROOT", Path(__file__).resolve().parents[1]))
-API_ROOT = Path(os.getenv("PHASE3_API_ROOT", REPO_ROOT / "apps" / "api"))
-DEFAULT_REPORT = REPO_ROOT / "artifacts" / "phase3_qdrant_payload_audit.md"
-DEFAULT_JSON_REPORT = REPO_ROOT / "artifacts" / "phase3_qdrant_payload_audit.json"
-
-REQUIRED_PAYLOAD_KEYS = {
-    "chunk_id",
-    "document_id",
-    "source_code",
-    "index_version_id",
-    "role_documentaire",
-    "theme_tags",
-    "visibility_scope",
-    "organization_id",
-    "access_level",
-    "data_tags",
-    "service_family",
-    "service_ids",
-}
+REPO_ROOT = Path(os.getenv("LAPYTHIE_REPO_ROOT", Path(__file__).resolve().parents[1]))
+API_ROOT = Path(os.getenv("LAPYTHIE_API_ROOT", REPO_ROOT / "apps" / "api"))
+DEFAULT_REPORT = REPO_ROOT / "artifacts" / "qdrant_payload_audit.md"
+DEFAULT_JSON_REPORT = REPO_ROOT / "artifacts" / "qdrant_payload_audit.json"
 
 
 @dataclass(frozen=True)
@@ -71,7 +56,15 @@ def _configure_imports() -> None:
 def audit_payloads(
     rows: list[ChunkPayloadAuditRow],
     payloads_by_point_id: dict[str, dict[str, Any] | None],
+    *,
+    registry: Any,
 ) -> dict[str, Any]:
+    from app.services.documentary.metadata_validation import (
+        MetadataValidationError,
+        build_qdrant_payload,
+        validate_qdrant_payload,
+    )
+
     issues: list[dict[str, Any]] = []
 
     for row in rows:
@@ -95,53 +88,74 @@ def audit_payloads(
             )
             continue
 
-        missing_keys = sorted(
-            key
-            for key in REQUIRED_PAYLOAD_KEYS
-            if payload.get(key) in (None, "", [])
-        )
-        if missing_keys:
+        try:
+            expected_payload = build_qdrant_payload(row.metadata, registry=registry)
+        except MetadataValidationError as error:
             issues.append(
                 {
                     "chunk_id": row.chunk_id,
                     "point_id": row.qdrant_point_id,
-                    "issue": "missing_required_payload_keys",
-                    "keys": missing_keys,
+                    "issue": "invalid_chunk_metadata",
+                    "validation_issues": [
+                        {
+                            "code": issue.code,
+                            "field": issue.field,
+                            "message": issue.message,
+                        }
+                        for issue in error.issues
+                    ],
+                }
+            )
+            continue
+
+        if expected_payload.get("chunk_id") != row.chunk_id:
+            issues.append(
+                {
+                    "chunk_id": row.chunk_id,
+                    "point_id": row.qdrant_point_id,
+                    "issue": "chunk_metadata_id_mismatch",
+                    "metadata_value": expected_payload.get("chunk_id"),
                 }
             )
 
-        for key in sorted(REQUIRED_PAYLOAD_KEYS - {"chunk_id"}):
-            if payload.get(key) != row.metadata.get(key):
-                issues.append(
-                    {
-                        "chunk_id": row.chunk_id,
-                        "point_id": row.qdrant_point_id,
-                        "issue": "payload_metadata_mismatch",
-                        "key": key,
-                        "db_value": row.metadata.get(key),
-                        "qdrant_value": payload.get(key),
-                    }
-                )
-
-        if payload.get("chunk_id") != row.chunk_id:
+        try:
+            validate_qdrant_payload(payload, registry=registry)
+        except MetadataValidationError as error:
             issues.append(
                 {
                     "chunk_id": row.chunk_id,
                     "point_id": row.qdrant_point_id,
-                    "issue": "payload_chunk_id_mismatch",
-                    "qdrant_value": payload.get("chunk_id"),
+                    "issue": "invalid_qdrant_payload",
+                    "validation_issues": [
+                        {
+                            "code": issue.code,
+                            "field": issue.field,
+                            "message": issue.message,
+                        }
+                        for issue in error.issues
+                    ],
                 }
             )
 
-        has_page_range = (
-            payload.get("page_start") is not None and payload.get("page_end") is not None
-        )
-        if not has_page_range and not payload.get("section"):
+        missing_keys = sorted(set(expected_payload) - set(payload))
+        unexpected_keys = sorted(set(payload) - set(expected_payload))
+        mismatched_values = {
+            key: {
+                "db_value": expected_payload[key],
+                "qdrant_value": payload[key],
+            }
+            for key in sorted(set(expected_payload) & set(payload))
+            if expected_payload[key] != payload[key]
+        }
+        if missing_keys or unexpected_keys or mismatched_values:
             issues.append(
                 {
                     "chunk_id": row.chunk_id,
                     "point_id": row.qdrant_point_id,
-                    "issue": "missing_page_range_or_section",
+                    "issue": "payload_metadata_mismatch",
+                    "missing_keys": missing_keys,
+                    "unexpected_keys": unexpected_keys,
+                    "mismatched_values": mismatched_values,
                 }
             )
 
@@ -256,7 +270,7 @@ def _write_reports(
     )
 
     lines = [
-        "# Phase 3 Qdrant Payload Audit",
+        "# Qdrant Payload Audit",
         "",
         f"Generated at: `{payload['generated_at']}`",
         f"Index version id: `{payload['index_version_id']}`",
@@ -302,7 +316,7 @@ def _write_reports(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Audit Phase 3 Qdrant payloads.")
+    parser = argparse.ArgumentParser(description="Audit Qdrant payloads.")
     parser.add_argument("--index-version-id", default=None)
     parser.add_argument("--report", default=str(DEFAULT_REPORT.relative_to(REPO_ROOT)))
     parser.add_argument(
@@ -315,6 +329,8 @@ def main() -> None:
     _normalize_local_service_urls()
     _configure_imports()
 
+    from app.services.documentary.metadata_registry import get_metadata_registry
+
     index_version_id = UUID(args.index_version_id) if args.index_version_id else None
     index_version = _fetch_index_version(index_version_id)
     rows = _fetch_chunk_rows(index_version["id"])
@@ -323,7 +339,7 @@ def main() -> None:
         collection_name=index_version["vector_collection"],
         point_ids=[str(point_id) for point_id in point_ids],
     )
-    audit = audit_payloads(rows, payloads)
+    audit = audit_payloads(rows, payloads, registry=get_metadata_registry())
 
     report_path = Path(args.report)
     if not report_path.is_absolute():

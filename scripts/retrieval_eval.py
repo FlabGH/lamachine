@@ -11,20 +11,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import yaml
 
 
-REPO_ROOT = Path(os.getenv("PHASE3_REPO_ROOT", Path(__file__).resolve().parents[1]))
-API_ROOT = Path(os.getenv("PHASE3_API_ROOT", REPO_ROOT / "apps" / "api"))
+REPO_ROOT = Path(os.getenv("LAPYTHIE_REPO_ROOT", Path(__file__).resolve().parents[1]))
+API_ROOT = Path(os.getenv("LAPYTHIE_API_ROOT", REPO_ROOT / "apps" / "api"))
 DEFAULT_MANIFEST = REPO_ROOT / "corpus" / "poc_ia" / "manifest.yaml"
 DEFAULT_FILES_DIR = REPO_ROOT / "corpus" / "poc_ia" / "files"
 DEFAULT_QUERY_CANDIDATES = [
     REPO_ROOT / "corpus" / "poc_ia" / "evaluation_queries.yaml",
     REPO_ROOT / "corpus" / "evaluation_queries.yaml",
 ]
-DEFAULT_REPORT = REPO_ROOT / "artifacts" / "phase3_retrieval_eval_report.md"
+DEFAULT_REPORT = REPO_ROOT / "artifacts" / "retrieval_eval_report.md"
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,6 @@ class QuerySpec:
     intent: str
     expected_source_codes: set[str]
     expected_document_ids: set[str]
-    expected_roles: set[str]
     expected_theme_tags: set[str]
     expected_pages: set[int]
 
@@ -93,8 +92,6 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _validate_manifest(manifest_path: Path, files_dir: Path) -> list[dict[str, Any]]:
-    from app.services.documentary.metadata_contract import normalize_document_metadata
-
     data = _load_yaml(manifest_path)
     documents = data.get("documents")
     if not isinstance(documents, list) or not documents:
@@ -107,12 +104,6 @@ def _validate_manifest(manifest_path: Path, files_dir: Path) -> list[dict[str, A
             errors.append(f"document[{index}] must be an object")
             continue
 
-        try:
-            metadata = normalize_document_metadata(document)
-        except ValueError as exc:
-            errors.append(f"{document.get('file', f'document[{index}]')}: {exc}")
-            continue
-
         file_name = document.get("file")
         if not isinstance(file_name, str) or not file_name.strip():
             errors.append(f"document[{index}] missing file")
@@ -121,6 +112,17 @@ def _validate_manifest(manifest_path: Path, files_dir: Path) -> list[dict[str, A
         file_path = files_dir / file_name
         if not file_path.exists():
             errors.append(f"{file_name}: file not found in {files_dir}")
+            continue
+
+        metadata = {key: value for key, value in document.items() if key != "file"}
+        if not isinstance(metadata.get("title"), str) or not metadata["title"].strip():
+            errors.append(f"{file_name}: title must be a non-empty string")
+            continue
+        if (
+            not isinstance(metadata.get("source_code"), str)
+            or not metadata["source_code"].strip()
+        ):
+            errors.append(f"{file_name}: source_code must be a non-empty string")
             continue
 
         normalized_documents.append(
@@ -154,7 +156,6 @@ def _load_queries(path: Path) -> list[QuerySpec]:
                 intent=str(item.get("intent", "")),
                 expected_source_codes={str(v).lower() for v in item.get("expected_source_codes", [])},
                 expected_document_ids={str(v) for v in item.get("expected_document_ids", [])},
-                expected_roles={str(v).lower() for v in item.get("expected_roles", [])},
                 expected_theme_tags={str(v) for v in item.get("expected_theme_tags", [])},
                 expected_pages=_normalize_expected_pages(item.get("expected_pages", [])),
             )
@@ -264,6 +265,8 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
         save_uploaded_file,
         sha256_bytes,
     )
+    from app.services.documentary.metadata_registry import MetadataScope, get_metadata_registry
+    from app.services.documentary.metadata_validation import validate_metadata
 
     metadata = dict(document["metadata"])
     file_path: Path = document["file_path"]
@@ -271,42 +274,43 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
     digest = sha256_bytes(content)
     storage_path, _ = save_uploaded_file(file_path.name, content)
     extraction = await extract_pdf_with_optional_ocr(storage_path, ocr_client=get_ocr_client())
-    document_metadata = {
-        **metadata,
-        **extraction.metadata(),
-    }
+    source_id = uuid4()
+    document_id = uuid4()
+    document_metadata = validate_metadata(
+        {
+            **metadata,
+            "source_id": str(source_id),
+            "document_id": str(document_id),
+            "mime_type": "application/pdf",
+            "filename": file_path.name,
+        },
+        scope=MetadataScope.document,
+        registry=get_metadata_registry(),
+    )
 
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO sources (code, source_type, origin)
-                VALUES (%s, 'pdf', %s)
+                INSERT INTO sources (id, code, source_type, origin)
+                VALUES (%s, %s, 'pdf', %s)
                 RETURNING id
                 """,
-                (metadata["source_code"], "phase3_step7_manifest"),
+                (source_id, metadata["source_code"], "retrieval_eval_manifest"),
             )
             source_id = cur.fetchone()["id"]
 
             cur.execute(
                 """
                 INSERT INTO documents (
-                    source_id, title, filename, mime_type,
+                    id, source_id, title, filename, mime_type,
                     storage_path, sha256, status, raw_text, metadata
                 )
-                VALUES (%s, %s, %s, 'application/pdf', %s, %s, 'parsed', %s, %s::jsonb)
-                ON CONFLICT (sha256) DO UPDATE
-                SET source_id = EXCLUDED.source_id,
-                    title = EXCLUDED.title,
-                    filename = EXCLUDED.filename,
-                    mime_type = EXCLUDED.mime_type,
-                    storage_path = EXCLUDED.storage_path,
-                    status = 'parsed',
-                    raw_text = EXCLUDED.raw_text,
-                    metadata = EXCLUDED.metadata
+                VALUES (%s, %s, %s, %s, 'application/pdf', %s, %s, 'parsed', %s, %s::jsonb)
                 RETURNING id
                 """,
                 (
+                    document_id,
                     source_id,
                     metadata["title"],
                     file_path.name,
@@ -317,6 +321,32 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
                 ),
             )
             document_id = cur.fetchone()["id"]
+
+            cur.execute(
+                """
+                INSERT INTO runs (run_type, status, input, output, finished_at)
+                VALUES (%s, %s, %s::jsonb, %s::jsonb, now())
+                """,
+                (
+                    "ingestion",
+                    "succeeded",
+                    json.dumps(
+                        {
+                            "filename": file_path.name,
+                            "source_code": metadata["source_code"],
+                            "metadata": document_metadata,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        {
+                            "document_id": str(document_id),
+                            **extraction.metadata(),
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
 
     return document_id
 
@@ -491,7 +521,6 @@ async def _run_query(
                 "chunk_id": str(hit.chunk_id),
                 "document_id": str(hit.document_id),
                 "source_code": metadata.get("source_code"),
-                "role_documentaire": metadata.get("role_documentaire"),
                 "theme_tags": theme_tags,
                 "page_start": metadata.get("page_start"),
                 "page_end": metadata.get("page_end"),
@@ -509,7 +538,6 @@ async def _run_query(
             if query.expected_document_ids
             else _recall_at(results, "source_code", query.expected_source_codes, top_k)
         ),
-        "role_hit": _recall_at(results, "role_documentaire", query.expected_roles, top_k),
         "page_hit": _page_hit_at(results, query.expected_pages, top_k),
         "source_mrr": _reciprocal_rank(results, "source_code", query.expected_source_codes, top_k),
         "document_mrr": (
@@ -517,7 +545,6 @@ async def _run_query(
             if query.expected_document_ids
             else _reciprocal_rank(results, "source_code", query.expected_source_codes, top_k)
         ),
-        "role_mrr": _reciprocal_rank(results, "role_documentaire", query.expected_roles, top_k),
         "page_coverage_rate": _page_coverage_rate(results, top_k),
         "latency_ms": latency_ms,
     }
@@ -536,9 +563,6 @@ def _chunk_quality_metrics(index_version_id: UUID) -> dict[str, float]:
                         WHERE COALESCE(metadata->>'source_code', '') = ''
                     ) AS missing_source_code,
                     COUNT(*) FILTER (
-                        WHERE COALESCE(metadata->>'role_documentaire', '') = ''
-                    ) AS missing_role_documentaire,
-                    COUNT(*) FILTER (
                         WHERE page_start IS NULL OR page_end IS NULL
                     ) AS missing_page_range
                 FROM document_chunks
@@ -553,14 +577,12 @@ def _chunk_quality_metrics(index_version_id: UUID) -> dict[str, float]:
         return {
             "total_chunks": 0,
             "missing_source_code_rate": 0.0,
-            "missing_role_documentaire_rate": 0.0,
             "missing_page_range_rate": 0.0,
         }
 
     return {
         "total_chunks": total,
         "missing_source_code_rate": int(row["missing_source_code"]) / total,
-        "missing_role_documentaire_rate": int(row["missing_role_documentaire"]) / total,
         "missing_page_range_rate": int(row["missing_page_range"]) / total,
     }
 
@@ -581,18 +603,16 @@ def _write_report(
     query_count = len(query_reports)
     source_recall = sum(1 for item in query_reports if item["source_hit"]) / query_count
     document_recall = sum(1 for item in query_reports if item["document_hit"]) / query_count
-    role_recall = sum(1 for item in query_reports if item["role_hit"]) / query_count
     page_recall = sum(1 for item in query_reports if item["page_hit"]) / query_count
     source_mrr = sum(float(item["source_mrr"]) for item in query_reports) / query_count
     document_mrr = sum(float(item["document_mrr"]) for item in query_reports) / query_count
-    role_mrr = sum(float(item["role_mrr"]) for item in query_reports) / query_count
     average_page_coverage = _average(
         [float(item["page_coverage_rate"]) for item in query_reports]
     )
     average_latency_ms = _average([float(item["latency_ms"]) for item in query_reports])
 
     lines = [
-        "# Phase 3 Retrieval Evaluation",
+        "# Retrieval Evaluation",
         "",
         f"Generated at: `{datetime.now(UTC).isoformat()}`",
         f"Manifest: `{manifest_path.relative_to(REPO_ROOT)}`",
@@ -606,16 +626,13 @@ def _write_report(
         "",
         f"- Recall@{top_k} source_code: {source_recall:.3f}",
         f"- Recall@{top_k} document: {document_recall:.3f}",
-        f"- Recall@{top_k} role_documentaire: {role_recall:.3f}",
         f"- Recall@{top_k} page: {page_recall:.3f}",
         f"- MRR source_code: {source_mrr:.3f}",
         f"- MRR document: {document_mrr:.3f}",
-        f"- MRR role_documentaire: {role_mrr:.3f}",
         f"- Page coverage@{top_k}: {average_page_coverage:.3f}",
         f"- Latence moyenne recherche: {average_latency_ms:.1f} ms",
         f"- Total chunks: {int(chunk_metrics['total_chunks'])}",
         f"- Chunks sans source_code: {chunk_metrics['missing_source_code_rate']:.3f}",
-        f"- Chunks sans role_documentaire: {chunk_metrics['missing_role_documentaire_rate']:.3f}",
         f"- Chunks sans page_start/page_end: {chunk_metrics['missing_page_range_rate']:.3f}",
         "",
         "## Query Results",
@@ -632,28 +649,24 @@ def _write_report(
                 f"- Intent: `{query.intent}`",
                 f"- Expected source_codes: `{', '.join(sorted(query.expected_source_codes))}`",
                 f"- Expected document_ids: `{', '.join(sorted(query.expected_document_ids))}`",
-                f"- Expected roles: `{', '.join(sorted(query.expected_roles))}`",
                 f"- Expected theme_tags: `{', '.join(sorted(query.expected_theme_tags))}`",
                 f"- Expected pages: `{', '.join(str(page) for page in sorted(query.expected_pages))}`",
                 f"- Hit source_code @{top_k}: {'yes' if item['source_hit'] else 'no'}",
                 f"- Hit document @{top_k}: {'yes' if item['document_hit'] else 'no'}",
-                f"- Hit role_documentaire @{top_k}: {'yes' if item['role_hit'] else 'no'}",
                 f"- Hit page @{top_k}: {'yes' if item['page_hit'] else 'no'}",
                 f"- Page coverage @{top_k}: {item['page_coverage_rate']:.3f}",
                 f"- Search latency: {item['latency_ms']:.1f} ms",
                 "",
-                "| rank | initial | score | dense | lexical | rerank | source_code | role_documentaire | theme_tags | pages | document_id | extrait | commentaire |",
-                "|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|---|",
+                "| rank | initial | score | dense | lexical | rerank | source_code | theme_tags | pages | document_id | extrait | commentaire |",
+                "|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|",
             ]
         )
 
         for result in item["results"]:
             source_hit = result["source_code"] in query.expected_source_codes
-            role_hit = result["role_documentaire"] in query.expected_roles
             theme_hit = bool(set(result["theme_tags"]) & query.expected_theme_tags)
             comment = (
                 f"source={'yes' if source_hit else 'no'}; "
-                f"role={'yes' if role_hit else 'no'}; "
                 f"theme={'yes' if theme_hit else 'no'}"
             )
             pages = ""
@@ -686,7 +699,6 @@ def _write_report(
                             else result["rerank_score"]
                         ),
                         _markdown_escape(result["source_code"]),
-                        _markdown_escape(result["role_documentaire"]),
                         _markdown_escape(", ".join(result["theme_tags"])),
                         _markdown_escape(pages),
                         _markdown_escape(result["document_id"]),
@@ -723,8 +735,8 @@ async def _run(args: argparse.Namespace) -> Path:
     queries = _load_queries(queries_path)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    index_name = args.index_name or f"phase3-step7-eval-{timestamp}"
-    vector_collection = args.vector_collection or f"phase3_step7_eval_{timestamp}"
+    index_name = args.index_name or f"retrieval-eval-{timestamp}"
+    vector_collection = args.vector_collection or f"retrieval_eval_{timestamp}"
     chunking_config = _chunking_config_from_args(args)
 
     if args.reuse_index_version_id:
@@ -783,7 +795,7 @@ async def _run(args: argparse.Namespace) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run Phase 3 retrieval evaluation.")
+    parser = argparse.ArgumentParser(description="Run retrieval evaluation.")
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST.relative_to(REPO_ROOT)))
     parser.add_argument("--queries", default=None)
     parser.add_argument("--files-dir", default=str(DEFAULT_FILES_DIR.relative_to(REPO_ROOT)))

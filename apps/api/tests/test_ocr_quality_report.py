@@ -7,9 +7,9 @@ def _load_ocr_report_module():
     script_path = (
         Path(__file__).resolve().parents[3]
         / "scripts"
-        / "phase3_ocr_quality_report.py"
+        / "ocr_quality_report.py"
     )
-    spec = importlib.util.spec_from_file_location("phase3_ocr_quality_report", script_path)
+    spec = importlib.util.spec_from_file_location("ocr_quality_report", script_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules[spec.name] = module
