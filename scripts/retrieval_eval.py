@@ -92,11 +92,18 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _validate_manifest(manifest_path: Path, files_dir: Path) -> list[dict[str, Any]]:
+    from app.services.documentary.metadata_registry import get_metadata_registry
+    from app.services.documentary.metadata_validation import (
+        MetadataValidationError,
+        validate_project_input_metadata,
+    )
+
     data = _load_yaml(manifest_path)
     documents = data.get("documents")
     if not isinstance(documents, list) or not documents:
         raise ValueError("manifest must contain a non-empty documents list")
 
+    registry = get_metadata_registry()
     normalized_documents = []
     errors = []
     for index, document in enumerate(documents, start=1):
@@ -115,14 +122,13 @@ def _validate_manifest(manifest_path: Path, files_dir: Path) -> list[dict[str, A
             continue
 
         metadata = {key: value for key, value in document.items() if key != "file"}
-        if not isinstance(metadata.get("title"), str) or not metadata["title"].strip():
-            errors.append(f"{file_name}: title must be a non-empty string")
-            continue
-        if (
-            not isinstance(metadata.get("source_code"), str)
-            or not metadata["source_code"].strip()
-        ):
-            errors.append(f"{file_name}: source_code must be a non-empty string")
+        if "title" not in metadata:
+            metadata["title"] = file_path.name
+
+        try:
+            validate_project_input_metadata(metadata, registry=registry)
+        except MetadataValidationError as exc:
+            errors.append(f"{file_name}: {exc}")
             continue
 
         normalized_documents.append(

@@ -38,6 +38,7 @@ from app.services.documentary.metadata_validation import (
     MetadataValidationError,
     build_qdrant_payload,
     propagate_document_metadata,
+    validate_project_input_metadata,
     validate_metadata,
     validate_retrieval_filters,
 )
@@ -490,6 +491,29 @@ def _normalize_ingestion_metadata_or_400(
                 ),
             },
         )
+
+    project_input = {
+        **parsed,
+        "source_code": source_code.strip().lower(),
+    }
+    if title.strip():
+        project_input["title"] = title.strip()
+    if isinstance(author, str) and author.strip():
+        project_input["author"] = author.strip()
+
+    try:
+        validate_project_input_metadata(
+            project_input,
+            registry=get_metadata_registry(),
+        )
+    except MetadataValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata",
+                "message": str(exc),
+            },
+        ) from exc
 
     metadata = {
         **parsed,

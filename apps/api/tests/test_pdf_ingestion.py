@@ -667,6 +667,23 @@ def test_ingest_text_returns_400_on_unknown_metadata(monkeypatch):
     assert "unknown_field" in exc_info.value.detail["message"]
 
 
+def test_ingest_text_returns_400_on_forbidden_project_input_metadata():
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documentary.ingest_text(
+                title="Note texte",
+                text="Contenu texte",
+                source_code="source",
+                metadata_json=json.dumps({"chunk_id": "chunk-1"}),
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["error"] == "invalid_metadata"
+    assert "chunk_id" in exc_info.value.detail["message"]
+    assert "controlled by the system" in exc_info.value.detail["message"]
+
+
 def test_ingest_pdf_stores_enriched_metadata_and_extraction(monkeypatch):
     cursor = CapturingCursor()
 
