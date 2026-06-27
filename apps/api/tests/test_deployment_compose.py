@@ -128,3 +128,13 @@ def test_remote_deploy_defaults_to_prod_compose_override():
     assert "infra/compose/docker-compose.yml infra/compose/docker-compose.prod.yml" in script
     assert 'compose_args+=("-f" "\\$compose_file")' in script
     assert 'docker compose "\\${compose_args[@]}" up -d --build' in script
+
+
+def test_compose_files_do_not_define_project_name():
+    root_compose = ROOT_COMPOSE.read_text(encoding="utf-8").lstrip()
+    local_compose = LOCAL_COMPOSE.read_text(encoding="utf-8").lstrip()
+    prod_compose = PROD_COMPOSE.read_text(encoding="utf-8").lstrip()
+
+    assert not root_compose.startswith("name:")
+    assert not local_compose.startswith("name:")
+    assert not prod_compose.startswith("name:")
