@@ -41,6 +41,12 @@ class ValuesOwner(str, Enum):
     none = "none"
 
 
+class ProjectInputPolicy(str, Enum):
+    required = "required"
+    optional = "optional"
+    forbidden = "forbidden"
+
+
 class MetadataScope(str, Enum):
     document = "document"
     chunk = "chunk"
@@ -60,6 +66,7 @@ class MetadataFieldDefinition(BaseModel):
     propagate_to_qdrant: bool
     qdrant_required: bool
     retrieval_filterable: bool
+    project_input: ProjectInputPolicy
     values_owner: ValuesOwner
     values: list[str] | None = None
     description: str = Field(min_length=1)
@@ -106,6 +113,18 @@ class MetadataFieldDefinition(BaseModel):
             raise ValueError(
                 "retrieval_filterable fields must propagate_to_qdrant"
             )
+        if (
+            self.project_input is not ProjectInputPolicy.forbidden
+            and MetadataScope.document not in scopes
+        ):
+            raise ValueError(
+                "project_input required or optional fields must allow document scope"
+            )
+        if (
+            self.project_input is ProjectInputPolicy.required
+            and not self.required
+        ):
+            raise ValueError("project_input required fields must be required")
         if self.type not in {MetadataType.enum, MetadataType.list} and self.values:
             raise ValueError("values are only allowed for enum or list fields")
         if self.values_owner is ValuesOwner.none and self.values is not None:

@@ -38,6 +38,7 @@ def _field(**overrides):
         "propagate_to_qdrant": False,
         "qdrant_required": False,
         "retrieval_filterable": False,
+        "project_input": "forbidden",
         "values_owner": "none",
         "values": None,
         "description": "Test field.",

@@ -28,11 +28,14 @@ def _field(**overrides):
         "propagate_to_qdrant": False,
         "qdrant_required": False,
         "retrieval_filterable": False,
+        "project_input": "optional",
         "values_owner": "none",
         "values": None,
         "description": "Test field description.",
     }
     field.update(overrides)
+    if "project_input" not in overrides and "document" not in field["scopes"]:
+        field["project_input"] = "forbidden"
     return field
 
 
@@ -43,6 +46,11 @@ def test_core_and_default_project_registries_load():
 
     assert core.fields["language"].values_owner.value == "core"
     assert core.fields["document_type"].values_owner.value == "project"
+    assert core.fields["source_code"].project_input.value == "required"
+    assert core.fields["title"].project_input.value == "optional"
+    assert core.fields["document_id"].project_input.value == "forbidden"
+    assert core.fields["mime_type"].project_input.value == "forbidden"
+    assert core.fields["chunk_id"].project_input.value == "forbidden"
     assert all(field.description for field in core.fields.values())
     assert project.overrides == {}
     assert project.fields == {}
@@ -173,6 +181,34 @@ def test_registry_rejects_filterable_field_without_qdrant_propagation():
                     "title": _field(
                         scopes=["chunk"],
                         retrieval_filterable=True,
+                    )
+                }
+            }
+        )
+
+
+def test_registry_rejects_project_input_without_document_scope():
+    with pytest.raises(ValidationError, match="must allow document scope"):
+        MetadataRegistry.model_validate(
+            {
+                "fields": {
+                    "chunk_id": _field(
+                        scopes=["chunk"],
+                        project_input="optional",
+                    )
+                }
+            }
+        )
+
+
+def test_registry_rejects_project_input_required_without_required_field():
+    with pytest.raises(ValidationError, match="must be required"):
+        MetadataRegistry.model_validate(
+            {
+                "fields": {
+                    "source_code": _field(
+                        required=False,
+                        project_input="required",
                     )
                 }
             }

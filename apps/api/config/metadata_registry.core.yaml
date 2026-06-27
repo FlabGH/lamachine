@@ -4,6 +4,7 @@ fields:
     type: free
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: false
     qdrant_required: false
@@ -16,6 +17,7 @@ fields:
     type: free
     scopes: [document, chunk]
     required: true
+    project_input: required
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: true
@@ -28,6 +30,7 @@ fields:
     type: free
     scopes: [document, chunk]
     required: false
+    project_input: forbidden
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -40,6 +43,7 @@ fields:
     type: free
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -52,6 +56,7 @@ fields:
     type: free
     scopes: [document]
     required: false
+    project_input: optional
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -64,6 +69,7 @@ fields:
     type: date
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -76,6 +82,7 @@ fields:
     type: datetime
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -88,6 +95,7 @@ fields:
     type: enum
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -100,6 +108,7 @@ fields:
     type: boolean
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -112,6 +121,7 @@ fields:
     type: enum
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -124,6 +134,7 @@ fields:
     type: enum
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -136,6 +147,7 @@ fields:
     type: enum
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -148,6 +160,7 @@ fields:
     type: enum
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -160,6 +173,7 @@ fields:
     type: enum
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -172,6 +186,7 @@ fields:
     type: number
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -184,6 +199,7 @@ fields:
     type: free
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -196,6 +212,7 @@ fields:
     type: free
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -208,6 +225,7 @@ fields:
     type: datetime
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -220,6 +238,7 @@ fields:
     type: enum
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -232,6 +251,7 @@ fields:
     type: list
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -244,6 +264,7 @@ fields:
     type: list
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -256,6 +277,7 @@ fields:
     type: free
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -268,6 +290,7 @@ fields:
     type: free
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -280,6 +303,7 @@ fields:
     type: enum
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -292,6 +316,7 @@ fields:
     type: free
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -304,6 +329,7 @@ fields:
     type: enum
     scopes: [document, chunk]
     required: false
+    project_input: optional
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: false
@@ -316,6 +342,7 @@ fields:
     type: free
     scopes: [document, chunk]
     required: true
+    project_input: forbidden
     propagate_to_chunks: true
     propagate_to_qdrant: true
     qdrant_required: true
@@ -328,6 +355,7 @@ fields:
     type: free
     scopes: [chunk, retrieval_hit]
     required: true
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: true
@@ -340,6 +368,7 @@ fields:
     type: integer
     scopes: [chunk]
     required: true
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -352,6 +381,7 @@ fields:
     type: free
     scopes: [chunk]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -364,6 +394,7 @@ fields:
     type: free
     scopes: [document]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -376,6 +407,7 @@ fields:
     type: free
     scopes: [document]
     required: true
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -388,6 +420,7 @@ fields:
     type: free
     scopes: [chunk]
     required: true
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -400,6 +433,7 @@ fields:
     type: free
     scopes: [document]
     required: false
+    project_input: optional
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -412,6 +446,7 @@ fields:
     type: free
     scopes: [document, run]
     required: false
+    project_input: optional
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -424,6 +459,7 @@ fields:
     type: free
     scopes: [chunk, run]
     required: true
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -436,6 +472,7 @@ fields:
     type: free
     scopes: [chunk, run, retrieval_hit]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -448,6 +485,7 @@ fields:
     type: free
     scopes: [chunk, run]
     required: true
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -460,6 +498,7 @@ fields:
     type: free
     scopes: [chunk, run, model_call]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -472,6 +511,7 @@ fields:
     type: free
     scopes: [chunk, run, model_call]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -484,6 +524,7 @@ fields:
     type: integer
     scopes: [chunk, run, model_call]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -496,6 +537,7 @@ fields:
     type: free
     scopes: [chunk, run]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -508,6 +550,7 @@ fields:
     type: integer
     scopes: [chunk, run]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -520,6 +563,7 @@ fields:
     type: integer
     scopes: [chunk, run]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -532,6 +576,7 @@ fields:
     type: integer
     scopes: [chunk]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -544,6 +589,7 @@ fields:
     type: free
     scopes: [chunk]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: false
     qdrant_required: false
@@ -556,6 +602,7 @@ fields:
     type: integer
     scopes: [chunk]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -568,6 +615,7 @@ fields:
     type: integer
     scopes: [chunk]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -580,6 +628,7 @@ fields:
     type: free
     scopes: [chunk]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -592,6 +641,7 @@ fields:
     type: list
     scopes: [chunk]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false
@@ -604,6 +654,7 @@ fields:
     type: integer
     scopes: [chunk]
     required: false
+    project_input: forbidden
     propagate_to_chunks: false
     propagate_to_qdrant: true
     qdrant_required: false

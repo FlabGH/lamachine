@@ -22,11 +22,14 @@ def _field(**overrides):
         "propagate_to_qdrant": False,
         "qdrant_required": False,
         "retrieval_filterable": False,
+        "project_input": "optional",
         "values_owner": "none",
         "values": None,
         "description": "Test field description.",
     }
     field.update(overrides)
+    if "project_input" not in overrides and "document" not in field["scopes"]:
+        field["project_input"] = "forbidden"
     return field
 
 
@@ -138,6 +141,7 @@ def test_audit_command_returns_json_and_nonzero_for_issues(tmp_path, capsys):
                 "    propagate_to_qdrant: false",
                 "    qdrant_required: false",
                 "    retrieval_filterable: false",
+                "    project_input: optional",
                 "    values_owner: none",
                 "    values: null",
                 "    description: Test field description.",
