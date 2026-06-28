@@ -8,6 +8,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.services.documentary.enrichers import EnricherConfig
+
 
 API_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROJECT_CONFIG_PATH = API_ROOT / "config" / "project.yaml"
@@ -27,6 +29,7 @@ class DocumentaryProjectConfig(BaseModel):
     metadata_registry: MetadataRegistryConfig
     chunking_strategy: str
     retrieval_preset: str
+    enrichers: list[EnricherConfig] = Field(default_factory=list)
 
 
 class ProjectConfig(BaseModel):
