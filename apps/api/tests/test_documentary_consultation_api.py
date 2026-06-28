@@ -322,6 +322,17 @@ def test_document_loader_catalog_exposes_available_loaders():
     assert "pdf" in items["pdf_pypdf_ocr_v1"].file_extensions
 
 
+def test_documentary_enricher_catalog_exposes_available_enrichers():
+    response = consultation.get_documentary_enricher_catalog()
+
+    items = {item.name: item for item in response.items}
+    assert set(items) == {"noop_enricher_v1"}
+    assert items["noop_enricher_v1"].stages == ["pre_chunking", "post_chunking"]
+    assert items["noop_enricher_v1"].enabled_by_default is False
+    assert items["noop_enricher_v1"].produces_metadata is False
+    assert items["noop_enricher_v1"].produces_structured_objects is False
+
+
 def test_api_v1_alias_is_mounted():
     paths = {route.path for route in app.routes}
 
@@ -331,6 +342,8 @@ def test_api_v1_alias_is_mounted():
     assert "/api/v1/chunking/strategies" in paths
     assert "/v1/loaders" in paths
     assert "/api/v1/loaders" in paths
+    assert "/v1/enrichers" in paths
+    assert "/api/v1/enrichers" in paths
     assert "/v1/search" in paths
     assert "/api/v1/search" in paths
 
