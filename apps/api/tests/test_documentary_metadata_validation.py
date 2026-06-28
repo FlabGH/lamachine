@@ -8,6 +8,7 @@ from app.services.documentary.metadata_validation import (
     MetadataValidationError,
     build_qdrant_payload,
     propagate_document_metadata,
+    validate_project_input_metadata,
     validate_qdrant_payload,
     validate_retrieval_filters,
     validate_metadata,
@@ -24,11 +25,14 @@ def _field(**overrides):
         "propagate_to_qdrant": False,
         "qdrant_required": False,
         "retrieval_filterable": False,
+        "project_input": "optional",
         "values_owner": "none",
         "values": None,
         "description": "Test field description.",
     }
     field.update(overrides)
+    if "project_input" not in overrides and "document" not in field["scopes"]:
+        field["project_input"] = "forbidden"
     return field
 
 
@@ -111,6 +115,62 @@ def test_validate_metadata_rejects_empty_optional_value_when_provided():
 
 def test_validate_metadata_requires_chunk_fields_in_chunk_scope():
     assert "required_field_missing" in _issue_codes({}, scope=MetadataScope.chunk)
+
+
+def test_validate_project_input_metadata_accepts_required_and_optional_fields():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "source_code": _field(required=True, project_input="required"),
+                "title": _field(project_input="optional"),
+                "document_id": _field(
+                    required=True,
+                    project_input="forbidden",
+                ),
+            }
+        }
+    )
+
+    metadata = {"source_code": "source", "title": "Document"}
+
+    assert validate_project_input_metadata(metadata, registry=registry) == metadata
+
+
+def test_validate_project_input_metadata_rejects_missing_required_field():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "source_code": _field(required=True, project_input="required"),
+            }
+        }
+    )
+
+    with pytest.raises(MetadataValidationError) as exc_info:
+        validate_project_input_metadata({}, registry=registry)
+
+    assert exc_info.value.issues[0].code == "required_field_missing"
+
+
+def test_validate_project_input_metadata_rejects_forbidden_field():
+    registry = MetadataRegistry.model_validate(
+        {
+            "fields": {
+                "source_code": _field(required=True, project_input="required"),
+                "document_id": _field(
+                    required=True,
+                    project_input="forbidden",
+                ),
+            }
+        }
+    )
+
+    with pytest.raises(MetadataValidationError) as exc_info:
+        validate_project_input_metadata(
+            {"source_code": "source", "document_id": "doc-1"},
+            registry=registry,
+        )
+
+    assert exc_info.value.issues[0].code == "project_input_forbidden"
 
 
 def test_propagate_document_metadata_copies_declared_values():

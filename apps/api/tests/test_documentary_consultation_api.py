@@ -291,10 +291,14 @@ def test_metadata_catalog_exposes_registry_contract():
     assert item.kind == "project_business"
     assert item.type == "enum"
     assert item.scopes == ["document", "chunk"]
+    assert item.project_input == "optional"
     assert item.values_owner == "project"
     assert item.values is None
     assert item.description == "Functional category defined by the project."
     assert "role_documentaire" not in response.fields
+    assert response.fields["source_code"].project_input == "required"
+    assert response.fields["theme_tags"].project_input == "optional"
+    assert response.fields["document_id"].project_input == "forbidden"
 
 
 def test_api_v1_alias_is_mounted():

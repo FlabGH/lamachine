@@ -9,6 +9,7 @@ from app.services.documentary.metadata_registry import (
     MetadataRegistry,
     MetadataScope,
     MetadataType,
+    ProjectInputPolicy,
 )
 
 
@@ -182,6 +183,38 @@ def validate_metadata(
     if issues:
         raise MetadataValidationError(issues)
     return dict(metadata)
+
+
+def validate_project_input_metadata(
+    metadata: dict[str, Any],
+    *,
+    registry: MetadataRegistry,
+) -> dict[str, Any]:
+    """Validate metadata fields supplied by a project or manifest."""
+    issues = [
+        MetadataValidationIssue(
+            code="project_input_forbidden",
+            field=name,
+            message="Field is controlled by the system and cannot be supplied by a project",
+        )
+        for name in metadata
+        if (field := registry.fields.get(name)) is not None
+        and field.project_input is ProjectInputPolicy.forbidden
+    ]
+    if issues:
+        raise MetadataValidationError(issues)
+
+    required_names = {
+        name
+        for name, field in registry.fields.items()
+        if field.project_input is ProjectInputPolicy.required
+    }
+    return validate_metadata(
+        metadata,
+        scope=MetadataScope.document,
+        registry=registry,
+        required_field_names=required_names,
+    )
 
 
 def validate_qdrant_payload(

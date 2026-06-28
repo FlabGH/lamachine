@@ -73,3 +73,79 @@ queries:
     assert queries[0].expected_source_codes == {"example"}
     assert queries[0].expected_theme_tags == {"documentation"}
     assert not hasattr(queries[0], "expected_roles")
+
+
+def test_validate_manifest_uses_filename_as_title_fallback(tmp_path):
+    module = _load_eval_module()
+    module._configure_imports()
+    files_dir = tmp_path / "files"
+    files_dir.mkdir()
+    (files_dir / "document.pdf").write_bytes(b"%PDF")
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        """
+documents:
+  - file: document.pdf
+    source_code: example
+""".strip(),
+        encoding="utf-8",
+    )
+
+    documents = module._validate_manifest(manifest, files_dir)
+
+    assert documents[0]["metadata"]["title"] == "document.pdf"
+    assert documents[0]["metadata"]["source_code"] == "example"
+
+
+def test_validate_manifest_rejects_forbidden_project_input(tmp_path):
+    module = _load_eval_module()
+    module._configure_imports()
+    files_dir = tmp_path / "files"
+    files_dir.mkdir()
+    (files_dir / "document.pdf").write_bytes(b"%PDF")
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        """
+documents:
+  - file: document.pdf
+    source_code: example
+    document_id: doc-1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    try:
+        module._validate_manifest(manifest, files_dir)
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("manifest validation should have failed")
+
+    assert "document_id" in message
+    assert "controlled by the system" in message
+
+
+def test_validate_manifest_rejects_missing_required_project_input(tmp_path):
+    module = _load_eval_module()
+    module._configure_imports()
+    files_dir = tmp_path / "files"
+    files_dir.mkdir()
+    (files_dir / "document.pdf").write_bytes(b"%PDF")
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        """
+documents:
+  - file: document.pdf
+""".strip(),
+        encoding="utf-8",
+    )
+
+    try:
+        module._validate_manifest(manifest, files_dir)
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("manifest validation should have failed")
+
+    assert "source_code" in message
+    assert "Required field is missing" in message
