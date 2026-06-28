@@ -447,6 +447,16 @@ def _chunking_config_from_args(args: argparse.Namespace):
     )
 
 
+def _chunking_strategy_choices() -> list[str]:
+    _configure_imports()
+    from app.services.documentary.chunking import (
+        GENERIC_RECURSIVE_STRATEGY,
+        GENERIC_WINDOW_STRATEGY,
+    )
+
+    return [GENERIC_WINDOW_STRATEGY, GENERIC_RECURSIVE_STRATEGY]
+
+
 def _get_index_version(index_version_id: UUID) -> dict[str, Any]:
     from app.db import get_connection
 
@@ -801,6 +811,7 @@ async def _run(args: argparse.Namespace) -> Path:
 
 
 def main() -> None:
+    chunking_strategy_choices = _chunking_strategy_choices()
     parser = argparse.ArgumentParser(description="Run retrieval evaluation.")
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST.relative_to(REPO_ROOT)))
     parser.add_argument("--queries", default=None)
@@ -813,8 +824,8 @@ def main() -> None:
     parser.add_argument("--reuse-index-version-id", default=None)
     parser.add_argument(
         "--split-strategy",
-        choices=["generic_window_v1", "generic_recursive_v1"],
-        default="generic_window_v1",
+        choices=chunking_strategy_choices,
+        default=chunking_strategy_choices[0],
     )
     parser.add_argument("--chunking-version", default=None)
     parser.add_argument("--chunk-size", type=int, default=450)

@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _load_eval_module():
@@ -52,6 +53,37 @@ def test_average_returns_zero_for_empty_values():
 
     assert module._average([]) == 0.0
     assert module._average([10.0, 20.0]) == 15.0
+
+
+def test_chunking_config_from_args_uses_canonical_strategy_defaults():
+    module = _load_eval_module()
+    module._configure_imports()
+
+    default_config = module._chunking_config_from_args(
+        SimpleNamespace(
+            split_strategy="generic_window_v1",
+            chunking_version=None,
+            chunk_size=450,
+            chunk_overlap=80,
+            min_chunk_size=80,
+            max_chunk_size=650,
+        )
+    )
+    structural_config = module._chunking_config_from_args(
+        SimpleNamespace(
+            split_strategy="generic_recursive_v1",
+            chunking_version=None,
+            chunk_size=450,
+            chunk_overlap=80,
+            min_chunk_size=80,
+            max_chunk_size=650,
+        )
+    )
+
+    assert default_config.split_strategy == "generic_window_v1"
+    assert default_config.chunking_version == "generic_window_v1"
+    assert structural_config.split_strategy == "generic_recursive_v1"
+    assert structural_config.chunking_version == "generic_recursive_v1"
 
 
 def test_load_queries_uses_canonical_expectations_without_roles(tmp_path):
