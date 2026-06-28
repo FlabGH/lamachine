@@ -14,6 +14,10 @@ from app.services.documentary.contracts import (
     RetrievalScores,
     SourceReference,
     SourceSpan,
+    StructuredObjectInput,
+    StructuredObjectPayload,
+    StructuredObjectProducer,
+    StructuredObjectRecord,
 )
 
 
@@ -21,6 +25,7 @@ SOURCE_ID = UUID("00000000-0000-0000-0000-000000000001")
 DOCUMENT_ID = UUID("00000000-0000-0000-0000-000000000002")
 INDEX_VERSION_ID = UUID("00000000-0000-0000-0000-000000000003")
 CHUNK_ID = UUID("00000000-0000-0000-0000-000000000004")
+OBJECT_ID = UUID("00000000-0000-0000-0000-000000000005")
 
 
 def _source() -> SourceReference:
@@ -108,6 +113,59 @@ def test_chunk_contracts_hold_payload_and_persistence_identifiers():
             index_version_id=INDEX_VERSION_ID,
             chunk_index=-1,
             payload=_payload(),
+        )
+
+
+def test_structured_object_contracts_normalize_payload_and_keep_source_links():
+    payload = StructuredObjectPayload(
+        object_type=" Recommendation ",
+        title="  Recommandation  ",
+        content="  Renforcer la gouvernance documentaire.  ",
+        source_span=_span(),
+        metadata={"theme": "governance"},
+        confidence=0.8,
+    )
+    producer = StructuredObjectProducer(
+        name=" test_enricher ",
+        version=" v1 ",
+        parameters={"mode": "fixture"},
+    )
+    record = StructuredObjectRecord(
+        object_id=OBJECT_ID,
+        document_id=DOCUMENT_ID,
+        payload=payload,
+        producer=producer,
+        source_chunk_ids=[CHUNK_ID],
+    )
+
+    assert record.payload.object_type == "recommendation"
+    assert record.payload.title == "Recommandation"
+    assert record.payload.content == "Renforcer la gouvernance documentaire."
+    assert record.producer.name == "test_enricher"
+    assert record.producer.version == "v1"
+    assert record.source_chunk_ids == [CHUNK_ID]
+
+
+def test_structured_object_contracts_reject_empty_content_and_duplicate_chunks():
+    with pytest.raises(ValidationError, match="content"):
+        StructuredObjectPayload(object_type="risk", content=" ")
+
+    with pytest.raises(ValidationError, match="duplicates"):
+        StructuredObjectInput(
+            document_id=DOCUMENT_ID,
+            payload=StructuredObjectPayload(
+                object_type="finding",
+                content="Constat.",
+            ),
+            producer=StructuredObjectProducer(name="enricher"),
+            source_chunk_ids=[CHUNK_ID, CHUNK_ID],
+        )
+
+    with pytest.raises(ValidationError, match="less than or equal to 1"):
+        StructuredObjectPayload(
+            object_type="risk",
+            content="Risque.",
+            confidence=1.2,
         )
 
 

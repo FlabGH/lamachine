@@ -51,7 +51,45 @@ def upsert_chunks(
         ],
     )
 
+
+def upsert_points(
+    client: QdrantClient,
+    *,
+    collection_name: str,
+    points: list[tuple[UUID, list[float], dict]],
+) -> None:
+    client.upsert(
+        collection_name=collection_name,
+        points=[
+            PointStruct(
+                id=str(point_id),
+                vector=vector,
+                payload=payload,
+            )
+            for point_id, vector, payload in points
+        ],
+    )
+
+
 def search_chunks(
+    client: QdrantClient,
+    *,
+    collection_name: str,
+    query_vector: list[float],
+    limit: int,
+    query_filter: Filter | None = None,
+):
+    result = client.query_points(
+        collection_name=collection_name,
+        query=query_vector,
+        query_filter=query_filter,
+        limit=limit,
+        with_payload=True,
+    )
+    return result.points
+
+
+def search_points(
     client: QdrantClient,
     *,
     collection_name: str,
