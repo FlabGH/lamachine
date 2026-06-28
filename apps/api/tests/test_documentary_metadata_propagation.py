@@ -7,6 +7,7 @@ import pytest
 
 from app.api import documentary
 from app.services.ai.clients import EmbeddingResult, RerankResult
+from app.services.documentary.enrichers import EnricherConfig, EnrichmentStage
 from app.services.documentary.metadata_validation import MetadataValidationError
 
 
@@ -257,6 +258,58 @@ def test_metadata_propagates_from_document_to_chunks_qdrant_and_search_hits(
 
     assert qdrant_payload["chunk_id"] == str(CHUNK_ID)
     assert search_response.hits[0].chunk_id == CHUNK_ID
+
+
+def test_indexing_traces_enabled_noop_chunk_enricher(monkeypatch):
+    state = {
+        "queries": [],
+        "chunk_rows": {},
+        "qdrant_points": [],
+    }
+
+    class DocumentaryConfig:
+        enrichers = [
+            EnricherConfig(
+                name="noop_enricher_v1",
+                enabled=True,
+                stages=[EnrichmentStage.post_chunking],
+            )
+        ]
+
+    class ProjectConfig:
+        documentary = DocumentaryConfig()
+
+    monkeypatch.setattr(documentary, "get_project_config", lambda: ProjectConfig())
+    monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection(state))
+    monkeypatch.setattr(documentary, "get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr(documentary, "get_ai_backend_preset_name", lambda: "test")
+    monkeypatch.setattr(documentary, "get_qdrant_client", lambda: object())
+    monkeypatch.setattr(documentary, "ensure_collection", lambda *args, **kwargs: None)
+    monkeypatch.setattr(documentary, "uuid4", lambda: CHUNK_ID)
+    monkeypatch.setattr(
+        documentary,
+        "upsert_chunks",
+        lambda client, *, collection_name, points: state["qdrant_points"].extend(points),
+    )
+
+    asyncio.run(
+        documentary.index_document(
+            documentary.IndexRequest(
+                document_id=DOCUMENT_ID,
+                index_version_id=INDEX_VERSION_ID,
+            )
+        )
+    )
+
+    update_run_queries = [
+        params
+        for query, params in state["queries"]
+        if "UPDATE runs" in query and "SET status = 'succeeded'" in query
+    ]
+    output_payload = json.loads(update_run_queries[-1][0])
+    assert output_payload["enrichers"][0]["name"] == "noop_enricher_v1"
+    assert output_payload["enrichers"][0]["stage"] == "post_chunking"
+    assert output_payload["enrichers"][0]["trace"]["target"] == "chunk"
 
 
 def test_metadata_filter_restricts_dense_candidates(monkeypatch):

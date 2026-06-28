@@ -9,6 +9,7 @@ from app.services.ai.clients import OcrPage, OcrResult
 from app.api import documentary
 from app.services.documentary import ingestion
 from app.services.documentary.chunking import chunk_text
+from app.services.documentary.enrichers import EnricherConfig, EnrichmentStage
 from app.services.documentary.loaders import LoaderResult, LoaderTrace
 
 
@@ -136,6 +137,13 @@ def _document_insert_metadata(cursor):
         if "INSERT INTO documents" in query:
             return json.loads(params[-1])
     raise AssertionError("No document insert captured")
+
+
+def _run_payloads(cursor):
+    for query, params in cursor.executions:
+        if "INSERT INTO runs" in query:
+            return json.loads(params[2]), json.loads(params[3])
+    raise AssertionError("No run insert captured")
 
 
 def test_extract_pdf_returns_structured_success(monkeypatch):
@@ -752,6 +760,43 @@ def test_ingest_pdf_stores_enriched_metadata_and_extraction(monkeypatch):
     assert metadata["freshness_status"] == "current"
     assert "extraction" not in metadata
     assert "extracted_pages" not in metadata
+
+
+def test_ingest_pdf_traces_enabled_noop_enricher(monkeypatch):
+    cursor = CapturingCursor()
+
+    class DocumentaryConfig:
+        enrichers = [
+            EnricherConfig(
+                name="noop_enricher_v1",
+                enabled=True,
+                stages=[EnrichmentStage.pre_chunking],
+            )
+        ]
+
+    class ProjectConfig:
+        documentary = DocumentaryConfig()
+
+    monkeypatch.setattr(documentary, "get_project_config", lambda: ProjectConfig())
+    monkeypatch.setattr(
+        documentary,
+        "save_uploaded_file",
+        lambda filename, content: ("/tmp/document.pdf", "digest"),
+    )
+    monkeypatch.setattr(
+        documentary,
+        "get_loader",
+        lambda name: FakeLoader(_fake_loader_result(FakePdfExtraction())),
+    )
+    monkeypatch.setattr(documentary, "get_ocr_client", lambda: None)
+    monkeypatch.setattr(documentary, "get_connection", lambda: CapturingConnection(cursor))
+
+    asyncio.run(documentary.ingest_pdf(FakePdfUploadFile(), source_code="pdf"))
+
+    input_payload, output_payload = _run_payloads(cursor)
+    assert input_payload["enrichers"][0]["name"] == "noop_enricher_v1"
+    assert input_payload["enrichers"][0]["stage"] == "pre_chunking"
+    assert output_payload["enrichers"][0]["trace"]["target"] == "document"
 
 
 def test_ingest_pdf_returns_409_on_duplicate_sha256(monkeypatch):

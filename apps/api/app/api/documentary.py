@@ -15,6 +15,13 @@ from qdrant_client.models import FieldCondition, Filter, MatchAny
 import json
 
 from app.db import get_connection
+from app.services.documentary.enrichers import (
+    ChunkEnrichmentContext,
+    DocumentEnrichmentContext,
+    EnrichmentStage,
+    run_chunk_enrichers,
+    run_document_enrichers,
+)
 from app.services.documentary.ingestion import (
     save_uploaded_file,
     sha256_bytes,
@@ -59,7 +66,7 @@ from app.services.ai.clients import RerankCandidate
 from app.services.documentary.vector_store import search_chunks
 
 from app.services.ai.clients import LLMMessage
-from app.services.project_config import project_trace_payload
+from app.services.project_config import get_project_config, project_trace_payload
 
 router = APIRouter(prefix="/documentary", tags=["documentary"])
 
@@ -116,6 +123,54 @@ concat_ws(
     replace(COALESCE(metadata->>'theme_tags', ''), '_', ' ')
 )
 """
+
+
+def _configured_enrichers():
+    return get_project_config().documentary.enrichers
+
+
+def _run_pre_chunking_enrichers(
+    *,
+    document_id: UUID,
+    source_id: UUID,
+    source_code: str,
+    title: str,
+    raw_text: str,
+    metadata: dict,
+) -> tuple[dict, list[dict]]:
+    return run_document_enrichers(
+        DocumentEnrichmentContext(
+            document_id=str(document_id),
+            source_id=str(source_id),
+            source_code=source_code,
+            title=title,
+            raw_text=raw_text,
+            metadata=metadata,
+        ),
+        configs=_configured_enrichers(),
+        stage=EnrichmentStage.pre_chunking,
+    )
+
+
+def _run_post_chunking_enrichers(
+    *,
+    document_id: UUID,
+    chunk_id: UUID,
+    chunk_index: int,
+    content: str,
+    metadata: dict,
+) -> tuple[dict, list[dict]]:
+    return run_chunk_enrichers(
+        ChunkEnrichmentContext(
+            document_id=str(document_id),
+            chunk_id=str(chunk_id),
+            chunk_index=chunk_index,
+            content=content,
+            metadata=metadata,
+        ),
+        configs=_configured_enrichers(),
+        stage=EnrichmentStage.post_chunking,
+    )
 
 
 def _significant_lexical_terms(query: str) -> list[str]:
@@ -543,6 +598,23 @@ def _normalize_ingestion_metadata_or_400(
         ) from exc
 
 
+def _validate_document_metadata_or_400(metadata: dict) -> dict:
+    try:
+        return validate_metadata(
+            metadata,
+            scope=MetadataScope.document,
+            registry=get_metadata_registry(),
+        )
+    except MetadataValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata",
+                "message": str(exc),
+            },
+        ) from exc
+
+
 def _chunking_config_from_index_version(index_version: dict) -> ChunkingConfig:
     return ChunkingConfig.from_index_version(index_version)
 
@@ -631,6 +703,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
             chunks_skipped_duplicate = len(candidate_chunks) - len(chunks)
 
             prepared_chunks = []
+            enrichment_traces: list[dict] = []
             for chunk in chunks:
                 chunk_id = uuid4()
                 chunk_metadata = build_canonical_chunk_metadata(
@@ -665,6 +738,14 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     chunk_metadata,
                     registry=registry,
                 )
+                chunk_metadata, chunk_enrichment_traces = _run_post_chunking_enrichers(
+                    document_id=payload.document_id,
+                    chunk_id=chunk_id,
+                    chunk_index=chunk.chunk_index,
+                    content=chunk.content,
+                    metadata=chunk_metadata,
+                )
+                enrichment_traces.extend(chunk_enrichment_traces)
                 validate_metadata(
                     chunk_metadata,
                     scope=MetadataScope.chunk,
@@ -708,6 +789,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                             "embedding_model": embedding_client.model,
                             "embedding_dimension": embedding_client.dimension,
                             "chunking": chunking_config.metadata(),
+                            "enrichers": enrichment_traces,
                         }
                     ),
                     json.dumps({}),
@@ -929,6 +1011,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                             ),
                             "model_call_id": str(model_call_id),
                             "chunking": chunking_config.metadata(),
+                            "enrichers": enrichment_traces,
                         }
                     ),
                     run_id,
@@ -1668,6 +1751,15 @@ async def ingest_pdf(
         )
     )
     raw_text = loader_result.raw_text
+    document_metadata, enrichment_traces = _run_pre_chunking_enrichers(
+        document_id=document_id,
+        source_id=source_id,
+        source_code=normalized_source_code,
+        title=title,
+        raw_text=raw_text,
+        metadata=document_metadata,
+    )
+    document_metadata = _validate_document_metadata_or_400(document_metadata)
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1730,6 +1822,7 @@ async def ingest_pdf(
                             "source_code": normalized_source_code,
                             "extraction_status": loader_result.status,
                             "loader": loader_result.trace.metadata(),
+                            "enrichers": enrichment_traces,
                             "metadata": document_metadata,
                         }
                     ),
@@ -1737,6 +1830,7 @@ async def ingest_pdf(
                         {
                             "project": project_trace_payload(),
                             "document_id": str(document_id),
+                            "enrichers": enrichment_traces,
                             **loader_result.metadata(),
                         }
                     ),
@@ -1819,6 +1913,15 @@ async def ingest_text(
         source_id=source_id,
         document_id=document_id,
     )
+    document_metadata, enrichment_traces = _run_pre_chunking_enrichers(
+        document_id=document_id,
+        source_id=source_id,
+        source_code=normalized_source_code,
+        title=title,
+        raw_text=raw_text,
+        metadata=document_metadata,
+    )
+    document_metadata = _validate_document_metadata_or_400(document_metadata)
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1866,6 +1969,7 @@ async def ingest_text(
                             "title": title,
                             "source_code": normalized_source_code,
                             "loader": loader_result.trace.metadata(),
+                            "enrichers": enrichment_traces,
                             "metadata": document_metadata,
                         }
                     ),
@@ -1873,6 +1977,7 @@ async def ingest_text(
                         {
                             "project": project_trace_payload(),
                             "document_id": str(document_id),
+                            "enrichers": enrichment_traces,
                             **loader_result.metadata(),
                         }
                     ),
