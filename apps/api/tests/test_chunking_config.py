@@ -81,10 +81,10 @@ def test_chunking_strategy_registry_exposes_canonical_strategies_only():
     assert get_chunking_strategy(GENERIC_RECURSIVE_STRATEGY).info.supports_structure is True
 
     with pytest.raises(ValueError, match="Unsupported chunking strategy"):
-        get_chunking_strategy("word_window")
+        get_chunking_strategy("legacy_window")
 
     with pytest.raises(ValueError, match="Unsupported split_strategy"):
-        ChunkingConfig(split_strategy="word_window")
+        ChunkingConfig(split_strategy="legacy_window")
 
 
 def test_chunking_preserves_page_range_and_section_title():

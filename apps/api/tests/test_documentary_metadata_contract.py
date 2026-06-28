@@ -53,9 +53,9 @@ def _metadata(**overrides):
         "page_start": 1,
         "page_end": 2,
         "extra": {
-            "chunking_strategy": "word_window_v1",
-            "chunking_version": "word_window_v1",
-            "split_strategy": "word_window",
+            "chunking_strategy": "generic_window_v1",
+            "chunking_version": "generic_window_v1",
+            "split_strategy": "generic_window_v1",
         },
     }
     data.update(overrides)
@@ -74,9 +74,9 @@ def test_build_chunk_metadata_serializes_ids_and_keeps_pages():
     assert metadata["content_hash"] == "abc123"
     assert metadata["page_start"] == 1
     assert metadata["page_end"] == 2
-    assert metadata["chunking_strategy"] == "word_window_v1"
-    assert metadata["chunking_version"] == "word_window_v1"
-    assert metadata["split_strategy"] == "word_window"
+    assert metadata["chunking_strategy"] == "generic_window_v1"
+    assert metadata["chunking_version"] == "generic_window_v1"
+    assert metadata["split_strategy"] == "generic_window_v1"
 
 
 def test_build_canonical_chunk_metadata_uses_registry_field_names():
@@ -91,8 +91,8 @@ def test_build_canonical_chunk_metadata_uses_registry_field_names():
         vector_collection="test_collection",
         chunk_index=0,
         token_count=10,
-        chunking_version="word_window_v1",
-        chunking_strategy="word_window",
+        chunking_version="generic_window_v1",
+        chunking_strategy="generic_window_v1",
         chunk_size=450,
         chunk_overlap=80,
         page_start=1,
@@ -161,7 +161,7 @@ def test_build_qdrant_payload_contains_chunk_id_and_contract_metadata():
     assert payload["source_code"] == "source_fictive"
     assert payload["content_sha256"] == "abc123"
     assert payload["content_hash"] == "abc123"
-    assert payload["chunking_version"] == "word_window_v1"
+    assert payload["chunking_version"] == "generic_window_v1"
 
 
 def test_normalize_document_metadata_accepts_valid_role_documentaire():
@@ -385,8 +385,8 @@ def test_build_qdrant_payload_inherits_ingestion_metadata():
     )
     ingestion_metadata.update(
         {
-            "chunking_version": "word_window_v1",
-            "split_strategy": "word_window",
+            "chunking_version": "generic_window_v1",
+            "split_strategy": "generic_window_v1",
         }
     )
     chunk_metadata = _metadata(extra=ingestion_metadata)

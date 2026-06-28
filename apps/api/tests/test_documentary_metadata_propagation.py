@@ -104,10 +104,10 @@ class FakeCursor:
                 "vector_collection": "metadata_propagation_test",
                 "chunk_size": 80,
                 "chunk_overlap": 10,
-                "split_strategy": "word_window",
+                "split_strategy": "generic_window_v1",
                 "min_chunk_size": 1,
                 "max_chunk_size": 120,
-                "chunking_version": "word_window_v1",
+                "chunking_version": "generic_window_v1",
             }
             return
 
@@ -249,7 +249,7 @@ def test_metadata_propagates_from_document_to_chunks_qdrant_and_search_hits(
         assert metadata["content_hash"]
 
     for metadata in (chunk_metadata, hit_metadata):
-        assert metadata["chunking_strategy"] == "word_window"
+        assert metadata["chunking_strategy"] == "generic_window_v1"
 
     assert "chunking_strategy" not in qdrant_payload
     assert "chunk_index" not in qdrant_payload

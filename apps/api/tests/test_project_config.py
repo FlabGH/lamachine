@@ -37,7 +37,7 @@ def test_project_config_path_can_be_overridden(monkeypatch, tmp_path):
                 "  metadata_registry:",
                 "    core: config/registry.core.yaml",
                 "    project: config/registry.project.yaml",
-                "  chunking_strategy: section_aware_window_v1",
+                "  chunking_strategy: generic_recursive_v1",
                 "  retrieval_preset: control_hybrid_v1",
             ]
         ),

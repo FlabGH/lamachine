@@ -813,8 +813,8 @@ def main() -> None:
     parser.add_argument("--reuse-index-version-id", default=None)
     parser.add_argument(
         "--split-strategy",
-        choices=["word_window", "section_aware_window"],
-        default="word_window",
+        choices=["generic_window_v1", "generic_recursive_v1"],
+        default="generic_window_v1",
     )
     parser.add_argument("--chunking-version", default=None)
     parser.add_argument("--chunk-size", type=int, default=450)
