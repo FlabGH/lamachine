@@ -18,6 +18,7 @@ from app.api.documentary import (
 from app.db import get_connection
 from app.services.ai.factory import get_embedding_client
 from app.services.documentary.chunking import list_chunking_strategies
+from app.services.documentary.enrichers import list_enrichers
 from app.services.documentary.loaders import list_loaders
 from app.services.documentary.metadata_registry import (
     MetadataFieldDefinition,
@@ -96,6 +97,20 @@ class DocumentLoaderCatalogItem(StrictModel):
 
 class DocumentLoaderCatalogResponse(StrictModel):
     items: list[DocumentLoaderCatalogItem]
+
+
+class DocumentaryEnricherCatalogItem(StrictModel):
+    name: str
+    version: str
+    description: str
+    stages: list[str]
+    enabled_by_default: bool
+    produces_metadata: bool
+    produces_structured_objects: bool
+
+
+class DocumentaryEnricherCatalogResponse(StrictModel):
+    items: list[DocumentaryEnricherCatalogItem]
 
 
 class SearchFilterSemantics(StrictModel):
@@ -480,6 +495,24 @@ def get_document_loader_catalog() -> DocumentLoaderCatalogResponse:
                 ocr_supported=loader.ocr_supported,
             )
             for loader in list_loaders()
+        ]
+    )
+
+
+@router.get("/enrichers", response_model=DocumentaryEnricherCatalogResponse)
+def get_documentary_enricher_catalog() -> DocumentaryEnricherCatalogResponse:
+    return DocumentaryEnricherCatalogResponse(
+        items=[
+            DocumentaryEnricherCatalogItem(
+                name=enricher.name,
+                version=enricher.version,
+                description=enricher.description,
+                stages=[stage.value for stage in enricher.stages],
+                enabled_by_default=enricher.enabled_by_default,
+                produces_metadata=enricher.produces_metadata,
+                produces_structured_objects=enricher.produces_structured_objects,
+            )
+            for enricher in list_enrichers()
         ]
     )
 

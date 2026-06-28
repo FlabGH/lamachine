@@ -8,3 +8,4 @@ documentary:
     project: config/metadata_registry.project.yaml
   chunking_strategy: index_version_runtime
   retrieval_preset: hybrid_dense_lexical_rerank_v1
+  enrichers: []
