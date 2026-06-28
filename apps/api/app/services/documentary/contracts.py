@@ -117,6 +117,64 @@ class ChunkRecord(DocumentaryContract):
     qdrant_point_id: UUID | None = None
 
 
+class StructuredObjectProducer(DocumentaryContract):
+    name: str
+    version: str | None = None
+    parameters: Metadata = Field(default_factory=dict)
+
+    @field_validator("name", "version")
+    @classmethod
+    def normalize_text_fields(cls, value: str | None, info) -> str | None:
+        if value is None:
+            return None
+        return _normalized_text(value, info.field_name)
+
+
+class StructuredObjectPayload(DocumentaryContract):
+    object_type: str
+    title: str | None = None
+    content: str
+    source_span: SourceSpan = Field(default_factory=SourceSpan)
+    metadata: Metadata = Field(default_factory=dict)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+    @field_validator("object_type")
+    @classmethod
+    def normalize_object_type(cls, value: str) -> str:
+        return _normalized_text(value, "object_type").lower()
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _normalized_text(value, "title")
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        return _normalized_text(value, "content")
+
+
+class StructuredObjectInput(DocumentaryContract):
+    document_id: UUID
+    payload: StructuredObjectPayload
+    producer: StructuredObjectProducer
+    source_chunk_ids: list[UUID] = Field(default_factory=list)
+
+    @field_validator("source_chunk_ids")
+    @classmethod
+    def reject_duplicate_source_chunks(cls, value: list[UUID]) -> list[UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("source_chunk_ids must not contain duplicates")
+        return value
+
+
+class StructuredObjectRecord(StructuredObjectInput):
+    object_id: UUID
+    qdrant_point_id: UUID | None = None
+
+
 class MetadataFilters(DocumentaryContract):
     values: dict[str, list[str]] = Field(default_factory=dict)
 
