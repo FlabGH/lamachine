@@ -15,6 +15,7 @@ from app.api.documentary import (
     search_documents as documentary_search_documents,
 )
 from app.db import get_connection
+from app.services.documentary.chunking import list_chunking_strategies
 from app.services.documentary.metadata_registry import (
     MetadataFieldDefinition,
     get_metadata_registry,
@@ -61,6 +62,18 @@ class MetadataCatalogItem(StrictModel):
 
 class MetadataCatalogResponse(StrictModel):
     fields: dict[str, MetadataCatalogItem]
+
+
+class ChunkingStrategyCatalogItem(StrictModel):
+    name: str
+    version: str
+    description: str
+    supports_structure: bool
+    default_config: dict[str, int]
+
+
+class ChunkingStrategyCatalogResponse(StrictModel):
+    items: list[ChunkingStrategyCatalogItem]
 
 
 class SearchFilterSemantics(StrictModel):
@@ -358,6 +371,22 @@ def get_metadata_catalog() -> MetadataCatalogResponse:
             name: _entry_to_catalog_item(entry)
             for name, entry in registry.fields.items()
         }
+    )
+
+
+@router.get("/chunking/strategies", response_model=ChunkingStrategyCatalogResponse)
+def get_chunking_strategy_catalog() -> ChunkingStrategyCatalogResponse:
+    return ChunkingStrategyCatalogResponse(
+        items=[
+            ChunkingStrategyCatalogItem(
+                name=strategy.name,
+                version=strategy.version,
+                description=strategy.description,
+                supports_structure=strategy.supports_structure,
+                default_config=strategy.default_config,
+            )
+            for strategy in list_chunking_strategies()
+        ]
     )
 
 

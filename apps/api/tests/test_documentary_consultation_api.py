@@ -301,11 +301,23 @@ def test_metadata_catalog_exposes_registry_contract():
     assert response.fields["document_id"].project_input == "forbidden"
 
 
+def test_chunking_strategy_catalog_exposes_canonical_strategies():
+    response = consultation.get_chunking_strategy_catalog()
+
+    items = {item.name: item for item in response.items}
+    assert set(items) == {"generic_window_v1", "generic_recursive_v1"}
+    assert items["generic_window_v1"].supports_structure is False
+    assert items["generic_recursive_v1"].supports_structure is True
+    assert items["generic_window_v1"].default_config["chunk_size"] == 450
+
+
 def test_api_v1_alias_is_mounted():
     paths = {route.path for route in app.routes}
 
     assert "/v1/search/capabilities" in paths
     assert "/api/v1/search/capabilities" in paths
+    assert "/v1/chunking/strategies" in paths
+    assert "/api/v1/chunking/strategies" in paths
     assert "/v1/search" in paths
     assert "/api/v1/search" in paths
 
