@@ -19,6 +19,10 @@ from app.services.documentary.metadata_registry import (
     MetadataFieldDefinition,
     get_metadata_registry,
 )
+from app.services.documentary.structured_objects import (
+    get_structured_object as fetch_structured_object,
+    list_structured_objects as fetch_structured_objects,
+)
 from app.services.documentary.vector_store import get_qdrant_client
 
 
@@ -168,6 +172,24 @@ class ChunkDetail(ChunkSummary):
     pass
 
 
+class StructuredObjectRead(StrictModel):
+    object_id: UUID
+    document_id: UUID
+    object_type: str
+    title: str | None = None
+    content: str
+    source_span: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    producer: dict[str, Any] = Field(default_factory=dict)
+    confidence: float | None = None
+    source_chunk_ids: list[UUID] = Field(default_factory=list)
+    qdrant_point_id: UUID | None = None
+
+
+class StructuredObjectListResponse(PaginatedResponse):
+    items: list[StructuredObjectRead]
+
+
 class ExtractedPageRead(StrictModel):
     page: int
     text: str | None = None
@@ -310,6 +332,25 @@ def _without_total_count(row: dict[str, Any]) -> dict[str, Any]:
 
 def _source_from_row(row: dict[str, Any]) -> SourceSummary:
     return SourceSummary(**_without_total_count(row))
+
+
+def _structured_object_read(record) -> StructuredObjectRead:
+    return StructuredObjectRead(
+        object_id=record.object_id,
+        document_id=record.document_id,
+        object_type=record.payload.object_type,
+        title=record.payload.title,
+        content=record.payload.content,
+        source_span=record.payload.source_span.model_dump(
+            mode="json",
+            exclude_none=True,
+        ),
+        metadata=record.payload.metadata,
+        producer=record.producer.model_dump(mode="json", exclude_none=True),
+        confidence=record.payload.confidence,
+        source_chunk_ids=record.source_chunk_ids,
+        qdrant_point_id=record.qdrant_point_id,
+    )
 
 
 def _fetch_retrieval_score_rows(run_id: UUID) -> dict[UUID, dict[str, Any]]:
@@ -789,6 +830,61 @@ def get_document(document_id: UUID) -> DocumentDetail:
             "metadata": _safe_metadata(row.get("metadata")),
         },
     )
+
+
+@router.get(
+    "/documents/{document_id}/structured-objects",
+    response_model=StructuredObjectListResponse,
+)
+def list_document_structured_objects(
+    document_id: UUID,
+    limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    object_type: str | None = None,
+) -> StructuredObjectListResponse:
+    bounded_limit = _bounded_limit(limit)
+    total, records = fetch_structured_objects(
+        document_id=document_id,
+        object_type=object_type,
+        limit=bounded_limit,
+        offset=offset,
+    )
+    return StructuredObjectListResponse(
+        items=[_structured_object_read(record) for record in records],
+        limit=bounded_limit,
+        offset=offset,
+        total=total,
+    )
+
+
+@router.get("/structured-objects", response_model=StructuredObjectListResponse)
+def list_structured_objects(
+    limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    document_id: UUID | None = None,
+    object_type: str | None = None,
+) -> StructuredObjectListResponse:
+    bounded_limit = _bounded_limit(limit)
+    total, records = fetch_structured_objects(
+        document_id=document_id,
+        object_type=object_type,
+        limit=bounded_limit,
+        offset=offset,
+    )
+    return StructuredObjectListResponse(
+        items=[_structured_object_read(record) for record in records],
+        limit=bounded_limit,
+        offset=offset,
+        total=total,
+    )
+
+
+@router.get("/structured-objects/{object_id}", response_model=StructuredObjectRead)
+def get_structured_object(object_id: UUID) -> StructuredObjectRead:
+    record = fetch_structured_object(object_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Structured object not found")
+    return _structured_object_read(record)
 
 
 @router.get("/documents/{document_id}/chunks", response_model=ChunkListResponse)
