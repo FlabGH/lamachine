@@ -7,10 +7,14 @@ from app.api import documentary
 from app.api.documentary import ChunkingPreviewRequest
 from app.services.documentary.chunking import (
     ChunkingConfig,
+    GENERIC_RECURSIVE_STRATEGY,
+    GENERIC_WINDOW_STRATEGY,
     STRUCTURAL_CHUNKING_VERSION,
     STRUCTURAL_SPLIT_STRATEGY,
     chunk_text,
     deduplicate_chunks,
+    get_chunking_strategy,
+    list_chunking_strategies,
 )
 
 
@@ -22,15 +26,15 @@ def test_chunking_config_accepts_valid_values():
     config = ChunkingConfig(
         chunk_size=100,
         chunk_overlap=20,
-        split_strategy="word_window",
+        split_strategy=GENERIC_WINDOW_STRATEGY,
         min_chunk_size=30,
         max_chunk_size=150,
-        chunking_version="word_window_v2",
+        chunking_version=GENERIC_WINDOW_STRATEGY,
     )
 
     assert config.metadata() == {
-        "chunking_version": "word_window_v2",
-        "split_strategy": "word_window",
+        "chunking_version": GENERIC_WINDOW_STRATEGY,
+        "split_strategy": GENERIC_WINDOW_STRATEGY,
         "chunk_size": 100,
         "chunk_overlap": 20,
         "min_chunk_size": 30,
@@ -64,9 +68,23 @@ def test_different_chunking_configs_produce_different_chunks():
     )
 
     assert len(large_chunks) != len(small_chunks)
-    assert large_chunks[0].metadata["chunking_version"] == "word_window_v1"
-    assert small_chunks[0].metadata["chunking_strategy"] == "word_window"
+    assert large_chunks[0].metadata["chunking_version"] == GENERIC_WINDOW_STRATEGY
+    assert small_chunks[0].metadata["chunking_strategy"] == GENERIC_WINDOW_STRATEGY
     assert "split_strategy" not in small_chunks[0].metadata
+
+
+def test_chunking_strategy_registry_exposes_canonical_strategies_only():
+    strategy_names = {strategy.name for strategy in list_chunking_strategies()}
+
+    assert strategy_names == {GENERIC_WINDOW_STRATEGY, GENERIC_RECURSIVE_STRATEGY}
+    assert get_chunking_strategy(GENERIC_WINDOW_STRATEGY).info.supports_structure is False
+    assert get_chunking_strategy(GENERIC_RECURSIVE_STRATEGY).info.supports_structure is True
+
+    with pytest.raises(ValueError, match="Unsupported chunking strategy"):
+        get_chunking_strategy("legacy_window")
+
+    with pytest.raises(ValueError, match="Unsupported split_strategy"):
+        ChunkingConfig(split_strategy="legacy_window")
 
 
 def test_chunking_preserves_page_range_and_section_title():
@@ -228,9 +246,9 @@ def test_chunking_preview_returns_chunks_without_persisting(monkeypatch):
                     "id": index_version_id,
                     "chunk_size": 20,
                     "chunk_overlap": 5,
-                    "chunking_strategy": "word_window_v1",
-                    "chunking_version": "word_window_v1",
-                    "split_strategy": "word_window",
+                    "chunking_strategy": GENERIC_WINDOW_STRATEGY,
+                    "chunking_version": GENERIC_WINDOW_STRATEGY,
+                    "split_strategy": GENERIC_WINDOW_STRATEGY,
                     "min_chunk_size": 10,
                     "max_chunk_size": 40,
                 }

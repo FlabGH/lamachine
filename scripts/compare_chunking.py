@@ -39,9 +39,9 @@ def _run_eval(report_path: Path, *, structural: bool, args: argparse.Namespace) 
                 "--vector-collection",
                 f"chunking_structural_eval_{args.timestamp}",
                 "--split-strategy",
-                "section_aware_window",
+                "generic_recursive_v1",
                 "--chunking-version",
-                "section_aware_window_v1",
+                "generic_recursive_v1",
             ]
         )
     else:
@@ -92,7 +92,7 @@ def _write_comparison(
         f"Baseline report: `{baseline_report.relative_to(REPO_ROOT)}`",
         f"Structural report: `{structural_report.relative_to(REPO_ROOT)}`",
         "",
-        "| Metric | word_window_v1 | section_aware_window_v1 |",
+        "| Metric | generic_window_v1 | generic_recursive_v1 |",
         "|---|---:|---:|",
     ]
     for metric_name in metric_names:

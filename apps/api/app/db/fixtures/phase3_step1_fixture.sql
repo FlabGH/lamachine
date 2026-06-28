@@ -63,9 +63,9 @@ VALUES (
     'hash-embedding-v1',
     384,
     'phase3_step1_fixture',
-    'word_window_v1',
-    'word_window_v1',
-    'word_window',
+    'generic_window_v1',
+    'generic_window_v1',
+    'generic_window_v1',
     80,
     10,
     20,
@@ -111,8 +111,8 @@ VALUES
         "content_hash": "phase3-step1-chunk-0-sha256",
         "index_version_id": "10000000-0000-0000-0000-000000000003",
         "vector_collection": "phase3_step1_fixture",
-        "chunking_version": "word_window_v1",
-        "split_strategy": "word_window"
+        "chunking_version": "generic_window_v1",
+        "split_strategy": "generic_window_v1"
     }'::jsonb
 ),
 (
@@ -138,8 +138,8 @@ VALUES
         "content_hash": "phase3-step1-chunk-1-sha256",
         "index_version_id": "10000000-0000-0000-0000-000000000003",
         "vector_collection": "phase3_step1_fixture",
-        "chunking_version": "word_window_v1",
-        "split_strategy": "word_window"
+        "chunking_version": "generic_window_v1",
+        "split_strategy": "generic_window_v1"
     }'::jsonb
 )
 ON CONFLICT (document_id, index_version_id, chunk_index) DO NOTHING;
