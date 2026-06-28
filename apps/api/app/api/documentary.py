@@ -16,11 +16,10 @@ import json
 
 from app.db import get_connection
 from app.services.documentary.ingestion import (
-    extract_pdf_with_optional_ocr,
-    normalize_text,
     save_uploaded_file,
     sha256_bytes,
 )
+from app.services.documentary.loaders import LoaderInput, get_loader
 
 from app.services.documentary.chunking import (
     ChunkingConfig,
@@ -1660,11 +1659,15 @@ async def ingest_pdf(
     )
     content = await file.read()
     storage_path, digest = save_uploaded_file(file.filename or "upload.pdf", content)
-    extraction = await extract_pdf_with_optional_ocr(
-        storage_path,
-        ocr_client=get_ocr_client(),
+    loader_result = await get_loader("pdf_pypdf_ocr_v1").load(
+        LoaderInput(
+            mime_type=file.content_type or "application/pdf",
+            filename=file.filename,
+            path=storage_path,
+            ocr_client=get_ocr_client(),
+        )
     )
-    raw_text = extraction.raw_text
+    raw_text = loader_result.raw_text
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1725,7 +1728,8 @@ async def ingest_pdf(
                             "project": project_trace_payload(),
                             "filename": file.filename,
                             "source_code": normalized_source_code,
-                            "extraction_status": extraction.status,
+                            "extraction_status": loader_result.status,
+                            "loader": loader_result.trace.metadata(),
                             "metadata": document_metadata,
                         }
                     ),
@@ -1733,7 +1737,7 @@ async def ingest_pdf(
                         {
                             "project": project_trace_payload(),
                             "document_id": str(document_id),
-                            **extraction.metadata(),
+                            **loader_result.metadata(),
                         }
                     ),
                 ),
@@ -1797,7 +1801,10 @@ async def ingest_text(
     author: str | None = Form(default=None),
     metadata_json: str | None = Form(default=None),
 ) -> IngestionResponse:
-    raw_text = normalize_text(text)
+    loader_result = await get_loader("plain_text_v1").load(
+        LoaderInput(mime_type="text/plain", text=text)
+    )
+    raw_text = loader_result.raw_text
     digest = sha256_bytes(raw_text.encode("utf-8"))
     normalized_source_code = source_code.strip().lower()
     source_id = uuid4()
@@ -1858,6 +1865,7 @@ async def ingest_text(
                             "project": project_trace_payload(),
                             "title": title,
                             "source_code": normalized_source_code,
+                            "loader": loader_result.trace.metadata(),
                             "metadata": document_metadata,
                         }
                     ),
@@ -1865,6 +1873,7 @@ async def ingest_text(
                         {
                             "project": project_trace_payload(),
                             "document_id": str(document_id),
+                            **loader_result.metadata(),
                         }
                     ),
                 ),

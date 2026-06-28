@@ -311,6 +311,17 @@ def test_chunking_strategy_catalog_exposes_canonical_strategies():
     assert items["generic_window_v1"].default_config["chunk_size"] == 450
 
 
+def test_document_loader_catalog_exposes_available_loaders():
+    response = consultation.get_document_loader_catalog()
+
+    items = {item.name: item for item in response.items}
+    assert set(items) == {"pdf_pypdf_ocr_v1", "plain_text_v1"}
+    assert items["pdf_pypdf_ocr_v1"].ocr_supported is True
+    assert items["plain_text_v1"].ocr_supported is False
+    assert items["pdf_pypdf_ocr_v1"].mime_types == ["application/pdf"]
+    assert "pdf" in items["pdf_pypdf_ocr_v1"].file_extensions
+
+
 def test_api_v1_alias_is_mounted():
     paths = {route.path for route in app.routes}
 
@@ -318,6 +329,8 @@ def test_api_v1_alias_is_mounted():
     assert "/api/v1/search/capabilities" in paths
     assert "/v1/chunking/strategies" in paths
     assert "/api/v1/chunking/strategies" in paths
+    assert "/v1/loaders" in paths
+    assert "/api/v1/loaders" in paths
     assert "/v1/search" in paths
     assert "/api/v1/search" in paths
 

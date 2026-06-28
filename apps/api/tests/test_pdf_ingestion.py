@@ -9,6 +9,7 @@ from app.services.ai.clients import OcrPage, OcrResult
 from app.api import documentary
 from app.services.documentary import ingestion
 from app.services.documentary.chunking import chunk_text
+from app.services.documentary.loaders import LoaderResult, LoaderTrace
 
 
 class FakePdfPage:
@@ -104,6 +105,30 @@ class FakePdfExtraction:
                 }
             ],
         }
+
+
+class FakeLoader:
+    def __init__(self, result):
+        self.result = result
+
+    async def load(self, input):
+        return self.result
+
+
+def _fake_loader_result(extraction):
+    return LoaderResult(
+        raw_text=extraction.raw_text,
+        status=extraction.status,
+        pages=[],
+        trace=LoaderTrace(
+            name="pdf_pypdf_ocr_v1",
+            version="1",
+            mime_type="application/pdf",
+            file_extension="pdf",
+            status=extraction.status,
+        ),
+        extraction_metadata=extraction.metadata(),
+    )
 
 
 def _document_insert_metadata(cursor):
@@ -687,9 +712,6 @@ def test_ingest_text_returns_400_on_forbidden_project_input_metadata():
 def test_ingest_pdf_stores_enriched_metadata_and_extraction(monkeypatch):
     cursor = CapturingCursor()
 
-    async def fake_extract_pdf_with_optional_ocr(path, *, ocr_client=None):
-        return FakePdfExtraction()
-
     monkeypatch.setattr(
         documentary,
         "save_uploaded_file",
@@ -697,8 +719,8 @@ def test_ingest_pdf_stores_enriched_metadata_and_extraction(monkeypatch):
     )
     monkeypatch.setattr(
         documentary,
-        "extract_pdf_with_optional_ocr",
-        fake_extract_pdf_with_optional_ocr,
+        "get_loader",
+        lambda name: FakeLoader(_fake_loader_result(FakePdfExtraction())),
     )
     monkeypatch.setattr(documentary, "get_ocr_client", lambda: None)
     monkeypatch.setattr(
@@ -799,11 +821,8 @@ def test_ingest_pdf_returns_409_on_duplicate_sha256(monkeypatch):
         def cursor(self):
             return FakeCursor()
 
-    async def fake_extract_pdf_with_optional_ocr(path, *, ocr_client=None):
-        return FakeExtraction()
-
     monkeypatch.setattr(documentary, "save_uploaded_file", lambda filename, content: ("/tmp/duplicate.pdf", "digest"))
-    monkeypatch.setattr(documentary, "extract_pdf_with_optional_ocr", fake_extract_pdf_with_optional_ocr)
+    monkeypatch.setattr(documentary, "get_loader", lambda name: FakeLoader(_fake_loader_result(FakeExtraction())))
     monkeypatch.setattr(documentary, "get_ocr_client", lambda: None)
     monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection())
     monkeypatch.setattr(documentary.psycopg.errors, "UniqueViolation", FakeUniqueViolation)
