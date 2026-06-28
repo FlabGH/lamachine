@@ -3,15 +3,18 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
+from typing import Protocol
 
 
 PAGE_RE = re.compile(r"\[PAGE (?P<page>\d+)\]")
 SECTION_RE = re.compile(r"\[SECTION (?P<section>[^\]]+)\]")
-DEFAULT_CHUNKING_VERSION = "word_window_v1"
-DEFAULT_SPLIT_STRATEGY = "word_window"
-STRUCTURAL_SPLIT_STRATEGY = "section_aware_window"
-STRUCTURAL_CHUNKING_VERSION = "section_aware_window_v1"
-SUPPORTED_SPLIT_STRATEGIES = {DEFAULT_SPLIT_STRATEGY, STRUCTURAL_SPLIT_STRATEGY}
+GENERIC_WINDOW_STRATEGY = "generic_window_v1"
+GENERIC_RECURSIVE_STRATEGY = "generic_recursive_v1"
+DEFAULT_SPLIT_STRATEGY = GENERIC_WINDOW_STRATEGY
+DEFAULT_CHUNKING_VERSION = GENERIC_WINDOW_STRATEGY
+STRUCTURAL_SPLIT_STRATEGY = GENERIC_RECURSIVE_STRATEGY
+STRUCTURAL_CHUNKING_VERSION = GENERIC_RECURSIVE_STRATEGY
+SUPPORTED_SPLIT_STRATEGIES = {GENERIC_WINDOW_STRATEGY, GENERIC_RECURSIVE_STRATEGY}
 MARKDOWN_HEADING_RE = re.compile(r"^(?P<marks>#{1,4})\s+(?P<title>.+)$")
 NUMBERED_HEADING_RE = re.compile(r"^(?P<number>\d+(?:\.\d+){0,3})[.)]?\s+(?P<title>.+)$")
 NAMED_HEADING_RE = re.compile(
@@ -21,6 +24,22 @@ NAMED_HEADING_RE = re.compile(
 )
 MAX_HEADING_CHARS = 120
 MAX_HEADING_WORDS = 16
+
+
+@dataclass(frozen=True)
+class ChunkingStrategyInfo:
+    name: str
+    version: str
+    description: str
+    supports_structure: bool
+    default_config: dict
+
+
+class ChunkingStrategy(Protocol):
+    info: ChunkingStrategyInfo
+
+    def chunk(self, text: str, *, config: "ChunkingConfig") -> list["TextChunk"]:
+        ...
 
 
 @dataclass(frozen=True)
@@ -86,6 +105,60 @@ class TextChunk:
     page_end: int | None
     token_count: int
     metadata: dict
+
+
+class GenericWindowChunkingStrategy:
+    info = ChunkingStrategyInfo(
+        name=GENERIC_WINDOW_STRATEGY,
+        version="1",
+        description="Generic word window chunking with configurable overlap.",
+        supports_structure=False,
+        default_config={
+            "chunk_size": 450,
+            "chunk_overlap": 80,
+            "min_chunk_size": 80,
+            "max_chunk_size": 650,
+        },
+    )
+
+    def chunk(self, text: str, *, config: ChunkingConfig) -> list[TextChunk]:
+        return _chunk_words(text, chunking_config=config)
+
+
+class GenericRecursiveChunkingStrategy:
+    info = ChunkingStrategyInfo(
+        name=GENERIC_RECURSIVE_STRATEGY,
+        version="1",
+        description="Generic structure-aware chunking that falls back to word windows.",
+        supports_structure=True,
+        default_config={
+            "chunk_size": 450,
+            "chunk_overlap": 80,
+            "min_chunk_size": 80,
+            "max_chunk_size": 650,
+        },
+    )
+
+    def chunk(self, text: str, *, config: ChunkingConfig) -> list[TextChunk]:
+        return _chunk_section_aware(text, chunking_config=config)
+
+
+CHUNKING_STRATEGIES: dict[str, ChunkingStrategy] = {
+    GENERIC_WINDOW_STRATEGY: GenericWindowChunkingStrategy(),
+    GENERIC_RECURSIVE_STRATEGY: GenericRecursiveChunkingStrategy(),
+}
+
+
+def get_chunking_strategy(name: str) -> ChunkingStrategy:
+    normalized_name = name.strip()
+    try:
+        return CHUNKING_STRATEGIES[normalized_name]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported chunking strategy: {name}") from exc
+
+
+def list_chunking_strategies() -> list[ChunkingStrategyInfo]:
+    return [strategy.info for strategy in CHUNKING_STRATEGIES.values()]
 
 
 @dataclass
@@ -328,7 +401,7 @@ def _chunk_section_aware(text: str, *, chunking_config: ChunkingConfig) -> list[
             chunking_config=ChunkingConfig(
                 chunk_size=chunking_config.chunk_size,
                 chunk_overlap=chunking_config.chunk_overlap,
-                split_strategy=DEFAULT_SPLIT_STRATEGY,
+                split_strategy=GENERIC_WINDOW_STRATEGY,
                 min_chunk_size=chunking_config.min_chunk_size,
                 max_chunk_size=chunking_config.max_chunk_size,
                 chunking_version=chunking_config.chunking_version,
@@ -388,9 +461,8 @@ def chunk_text(
         min_chunk_size=min(80, chunk_size_words),
         max_chunk_size=max(650, chunk_size_words),
     )
-    if chunking_config.split_strategy == STRUCTURAL_SPLIT_STRATEGY:
-        return _chunk_section_aware(text, chunking_config=chunking_config)
-    return _chunk_words(text, chunking_config=chunking_config)
+    strategy = get_chunking_strategy(chunking_config.split_strategy)
+    return strategy.chunk(text, config=chunking_config)
 
 
 def deduplicate_chunks(chunks: list[TextChunk]) -> list[TextChunk]:
