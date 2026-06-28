@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from app.api.documentary import (
     SearchMetadataFilters,
@@ -15,15 +16,18 @@ from app.api.documentary import (
     search_documents as documentary_search_documents,
 )
 from app.db import get_connection
+from app.services.ai.factory import get_embedding_client
 from app.services.documentary.metadata_registry import (
     MetadataFieldDefinition,
     get_metadata_registry,
 )
 from app.services.documentary.structured_objects import (
+    get_structured_objects_by_ids,
     get_structured_object as fetch_structured_object,
     list_structured_objects as fetch_structured_objects,
+    structured_object_collection_name,
 )
-from app.services.documentary.vector_store import get_qdrant_client
+from app.services.documentary.vector_store import get_qdrant_client, search_points
 
 
 router = APIRouter(prefix="/v1", tags=["consultation"])
@@ -188,6 +192,24 @@ class StructuredObjectRead(StrictModel):
 
 class StructuredObjectListResponse(PaginatedResponse):
     items: list[StructuredObjectRead]
+
+
+class StructuredObjectSearchRequest(StrictModel):
+    query: str = Field(min_length=1)
+    index_version_id: UUID
+    top_k: int = Field(default=20, ge=1, le=100)
+    object_type: str | None = None
+
+
+class StructuredObjectSearchHit(StructuredObjectRead):
+    score: float | None = None
+    rank: int
+
+
+class StructuredObjectSearchResponse(StrictModel):
+    index_version_id: UUID
+    vector_collection: str
+    hits: list[StructuredObjectSearchHit]
 
 
 class ExtractedPageRead(StrictModel):
@@ -876,6 +898,80 @@ def list_structured_objects(
         limit=bounded_limit,
         offset=offset,
         total=total,
+    )
+
+
+@router.post(
+    "/structured-objects/search",
+    response_model=StructuredObjectSearchResponse,
+)
+async def search_structured_objects(
+    payload: StructuredObjectSearchRequest,
+) -> StructuredObjectSearchResponse:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT vector_collection
+                FROM index_versions
+                WHERE id = %s
+                """,
+                (payload.index_version_id,),
+            )
+            index_version = cur.fetchone()
+    if index_version is None:
+        raise HTTPException(status_code=404, detail="Index version not found")
+
+    vector_collection = structured_object_collection_name(
+        index_version["vector_collection"]
+    )
+    embedding_client = get_embedding_client()
+    embedding = await embedding_client.embed_texts([payload.query])
+    query_filter = None
+    if payload.object_type:
+        query_filter = Filter(
+            must=[
+                FieldCondition(
+                    key="object_type",
+                    match=MatchValue(value=payload.object_type.strip().lower()),
+                )
+            ]
+        )
+
+    points = search_points(
+        get_qdrant_client(),
+        collection_name=vector_collection,
+        query_vector=embedding.vectors[0],
+        limit=payload.top_k,
+        query_filter=query_filter,
+    )
+    object_ids = [
+        UUID(str(point.payload["object_id"]))
+        for point in points
+        if point.payload and point.payload.get("object_id")
+    ]
+    records_by_id = get_structured_objects_by_ids(object_ids)
+
+    hits = []
+    for rank, point in enumerate(points, start=1):
+        if not point.payload or not point.payload.get("object_id"):
+            continue
+        object_id = UUID(str(point.payload["object_id"]))
+        record = records_by_id.get(object_id)
+        if record is None:
+            continue
+        hits.append(
+            StructuredObjectSearchHit(
+                **_structured_object_read(record).model_dump(),
+                rank=rank,
+                score=float(point.score) if point.score is not None else None,
+            )
+        )
+
+    return StructuredObjectSearchResponse(
+        index_version_id=payload.index_version_id,
+        vector_collection=vector_collection,
+        hits=hits,
     )
 
 

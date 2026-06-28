@@ -1,8 +1,10 @@
+import asyncio
 from uuid import UUID
 
 from fastapi import HTTPException
 
 from app.api import consultation
+from app.services.ai.clients import EmbeddingResult
 from app.services.documentary.contracts import (
     SourceSpan,
     StructuredObjectInput,
@@ -177,3 +179,80 @@ def test_structured_object_api_returns_404_for_missing_object(monkeypatch):
         assert exc.status_code == 404
     else:
         raise AssertionError("missing structured object should return 404")
+
+
+def test_structured_object_qdrant_payload_and_collection_name():
+    payload = structured_objects.build_structured_object_qdrant_payload(_record())
+
+    assert structured_objects.structured_object_collection_name("chunks_v1") == (
+        "chunks_v1_objects"
+    )
+    assert payload["object_id"] == str(OBJECT_ID)
+    assert payload["document_id"] == str(DOCUMENT_ID)
+    assert payload["object_type"] == "recommendation"
+    assert payload["source_chunk_ids"] == [str(CHUNK_ID)]
+    assert payload["producer"]["name"] == "fixture_enricher"
+
+
+class FakeEmbeddingClient:
+    provider = "fake"
+    model = "fake-embedding"
+    dimension = 2
+
+    async def embed_texts(self, texts, *, metadata=None):
+        return EmbeddingResult(
+            vectors=[[0.1, 0.2]],
+            provider=self.provider,
+            model=self.model,
+            dimension=self.dimension,
+        )
+
+
+class FakePoint:
+    def __init__(self, object_id, score):
+        self.payload = {"object_id": str(object_id)}
+        self.score = score
+
+
+def test_structured_object_search_uses_separate_object_collection(monkeypatch):
+    cursor = FakeCursor(rows=[])
+    cursor._result = {"vector_collection": "chunks_v1"}
+    monkeypatch.setattr(
+        consultation,
+        "get_connection",
+        lambda: FakeConnection(cursor),
+    )
+    monkeypatch.setattr(consultation, "get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr(consultation, "get_qdrant_client", lambda: object())
+
+    captured = {}
+
+    def fake_search_points(*args, **kwargs):
+        captured.update(kwargs)
+        return [FakePoint(OBJECT_ID, 0.91)]
+
+    monkeypatch.setattr(consultation, "search_points", fake_search_points)
+    monkeypatch.setattr(
+        consultation,
+        "get_structured_objects_by_ids",
+        lambda object_ids: {OBJECT_ID: _record()},
+    )
+
+    response = asyncio.run(
+        consultation.search_structured_objects(
+            consultation.StructuredObjectSearchRequest(
+                query="gouvernance documentaire",
+                index_version_id=UUID("00000000-0000-0000-0000-000000000006"),
+                top_k=5,
+                object_type=" Recommendation ",
+            )
+        )
+    )
+
+    assert response.vector_collection == "chunks_v1_objects"
+    assert response.hits[0].object_id == OBJECT_ID
+    assert response.hits[0].rank == 1
+    assert response.hits[0].score == 0.91
+    assert captured["collection_name"] == "chunks_v1_objects"
+    assert captured["limit"] == 5
+    assert captured["query_filter"].must[0].key == "object_type"

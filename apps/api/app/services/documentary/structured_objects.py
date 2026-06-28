@@ -21,6 +21,28 @@ def _producer_payload(producer: StructuredObjectProducer) -> dict[str, Any]:
     return producer.model_dump(mode="json", exclude_none=True)
 
 
+def structured_object_collection_name(vector_collection: str) -> str:
+    return f"{vector_collection}_objects"
+
+
+def build_structured_object_qdrant_payload(
+    record: StructuredObjectRecord,
+) -> dict[str, Any]:
+    return {
+        "object_id": str(record.object_id),
+        "document_id": str(record.document_id),
+        "object_type": record.payload.object_type,
+        "title": record.payload.title,
+        "source_span": record.payload.source_span.model_dump(
+            mode="json",
+            exclude_none=True,
+        ),
+        "source_chunk_ids": [str(chunk_id) for chunk_id in record.source_chunk_ids],
+        "metadata": record.payload.metadata,
+        "producer": record.producer.model_dump(mode="json", exclude_none=True),
+    }
+
+
 def _row_to_record(row: dict[str, Any]) -> StructuredObjectRecord:
     source_chunk_ids = row.get("source_chunk_ids") or []
     return StructuredObjectRecord(
@@ -183,3 +205,41 @@ def get_structured_object(object_id: UUID) -> StructuredObjectRecord | None:
             )
             row = cur.fetchone()
     return None if row is None else _row_to_record(row)
+
+
+def get_structured_objects_by_ids(
+    object_ids: list[UUID],
+) -> dict[UUID, StructuredObjectRecord]:
+    if not object_ids:
+        return {}
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    structured_objects.id,
+                    structured_objects.document_id,
+                    structured_objects.object_type,
+                    structured_objects.title,
+                    structured_objects.content,
+                    structured_objects.source_span,
+                    structured_objects.metadata,
+                    structured_objects.producer,
+                    structured_objects.confidence,
+                    structured_objects.qdrant_point_id,
+                    COALESCE(
+                        array_agg(structured_object_chunks.chunk_id)
+                            FILTER (WHERE structured_object_chunks.chunk_id IS NOT NULL),
+                        ARRAY[]::uuid[]
+                    ) AS source_chunk_ids
+                FROM structured_objects
+                LEFT JOIN structured_object_chunks
+                    ON structured_object_chunks.structured_object_id = structured_objects.id
+                WHERE structured_objects.id = ANY(%s::uuid[])
+                GROUP BY structured_objects.id
+                """,
+                (object_ids,),
+            )
+            rows = cur.fetchall()
+    return {record.object_id: record for record in map(_row_to_record, rows)}
