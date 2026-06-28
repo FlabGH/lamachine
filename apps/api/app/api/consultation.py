@@ -16,7 +16,9 @@ from app.api.documentary import (
     search_documents as documentary_search_documents,
 )
 from app.db import get_connection
+from app.services.ai.factory import get_embedding_client
 from app.services.documentary.chunking import list_chunking_strategies
+from app.services.documentary.loaders import list_loaders
 from app.services.documentary.metadata_registry import (
     MetadataFieldDefinition,
     get_metadata_registry,
@@ -81,6 +83,19 @@ class ChunkingStrategyCatalogItem(StrictModel):
 
 class ChunkingStrategyCatalogResponse(StrictModel):
     items: list[ChunkingStrategyCatalogItem]
+
+
+class DocumentLoaderCatalogItem(StrictModel):
+    name: str
+    version: str
+    description: str
+    mime_types: list[str]
+    file_extensions: list[str]
+    ocr_supported: bool
+
+
+class DocumentLoaderCatalogResponse(StrictModel):
+    items: list[DocumentLoaderCatalogItem]
 
 
 class SearchFilterSemantics(StrictModel):
@@ -448,6 +463,23 @@ def get_chunking_strategy_catalog() -> ChunkingStrategyCatalogResponse:
                 default_config=strategy.default_config,
             )
             for strategy in list_chunking_strategies()
+        ]
+    )
+
+
+@router.get("/loaders", response_model=DocumentLoaderCatalogResponse)
+def get_document_loader_catalog() -> DocumentLoaderCatalogResponse:
+    return DocumentLoaderCatalogResponse(
+        items=[
+            DocumentLoaderCatalogItem(
+                name=loader.name,
+                version=loader.version,
+                description=loader.description,
+                mime_types=loader.mime_types,
+                file_extensions=loader.file_extensions,
+                ocr_supported=loader.ocr_supported,
+            )
+            for loader in list_loaders()
         ]
     )
 
