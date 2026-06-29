@@ -22,6 +22,7 @@ def test_project_config_loads_default_contract():
         "config/metadata_registry.project.yaml"
     )
     assert config.documentary.chunking_strategy == "index_version_runtime"
+    assert config.documentary.retrieval_presets == "config/retrieval_presets.yaml"
     assert config.documentary.retrieval_preset == "hybrid_dense_lexical_rerank_v1"
     assert config.documentary.enrichers == []
 
@@ -39,6 +40,7 @@ def test_project_config_path_can_be_overridden(monkeypatch, tmp_path):
                 "    core: config/registry.core.yaml",
                 "    project: config/registry.project.yaml",
                 "  chunking_strategy: generic_recursive_v1",
+                "  retrieval_presets: config/retrieval_presets.yaml",
                 "  retrieval_preset: control_hybrid_v1",
                 "  enrichers:",
                 "    - name: noop_enricher_v1",
@@ -57,6 +59,7 @@ def test_project_config_path_can_be_overridden(monkeypatch, tmp_path):
     assert config.project_id == "corpus-controle"
     assert config.project_name == "CorpusControle"
     assert config.config_version == 2
+    assert config.documentary.retrieval_presets == "config/retrieval_presets.yaml"
     assert config.documentary.retrieval_preset == "control_hybrid_v1"
     assert config.documentary.enrichers[0].name == "noop_enricher_v1"
     assert config.documentary.enrichers[0].enabled is False

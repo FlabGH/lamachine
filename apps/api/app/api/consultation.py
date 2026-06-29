@@ -24,6 +24,11 @@ from app.services.documentary.metadata_registry import (
     MetadataFieldDefinition,
     get_metadata_registry,
 )
+from app.services.documentary.retrieval_presets import (
+    RetrievalPreset,
+    get_retrieval_preset,
+    list_retrieval_presets,
+)
 from app.services.documentary.structured_objects import (
     get_structured_objects_by_ids,
     get_structured_object as fetch_structured_object,
@@ -111,6 +116,23 @@ class DocumentaryEnricherCatalogItem(StrictModel):
 
 class DocumentaryEnricherCatalogResponse(StrictModel):
     items: list[DocumentaryEnricherCatalogItem]
+
+
+class RetrievalPresetCatalogItem(StrictModel):
+    name: str
+    description: str
+    dense_top_k: int
+    lexical_top_k: int
+    rerank_top_k: int
+    reranking_strategy: str
+    filters: dict[str, list[Any]]
+    trace_parameters: dict[str, Any]
+    active: bool
+
+
+class RetrievalPresetCatalogResponse(StrictModel):
+    items: list[RetrievalPresetCatalogItem]
+    active_preset: str
 
 
 class SearchFilterSemantics(StrictModel):
@@ -308,6 +330,7 @@ class StableSearchRequest(StrictModel):
     top_k: int = Field(default_factory=_default_search_top_k, ge=1, le=100)
     rerank_top_k: int = Field(default_factory=_default_rerank_top_k, ge=1, le=100)
     filters: SearchMetadataFilters | None = None
+    preset: str | None = Field(default=None, min_length=1)
 
 
 class StableSearchHit(StrictModel):
@@ -344,6 +367,24 @@ def _entry_to_catalog_item(entry: MetadataFieldDefinition) -> MetadataCatalogIte
         values_owner=entry.values_owner.value,
         values=entry.values,
         description=entry.description,
+    )
+
+
+def _retrieval_preset_to_catalog_item(
+    preset: RetrievalPreset,
+    *,
+    active_preset: str,
+) -> RetrievalPresetCatalogItem:
+    return RetrievalPresetCatalogItem(
+        name=preset.name,
+        description=preset.description,
+        dense_top_k=preset.dense_top_k,
+        lexical_top_k=preset.lexical_top_k,
+        rerank_top_k=preset.rerank_top_k,
+        reranking_strategy=preset.reranking_strategy.value,
+        filters=preset.filters,
+        trace_parameters=preset.trace_parameters,
+        active=preset.name == active_preset,
     )
 
 
@@ -514,6 +555,21 @@ def get_documentary_enricher_catalog() -> DocumentaryEnricherCatalogResponse:
             )
             for enricher in list_enrichers()
         ]
+    )
+
+
+@router.get("/retrieval/presets", response_model=RetrievalPresetCatalogResponse)
+def get_retrieval_preset_catalog() -> RetrievalPresetCatalogResponse:
+    active_preset = get_retrieval_preset().name
+    return RetrievalPresetCatalogResponse(
+        active_preset=active_preset,
+        items=[
+            _retrieval_preset_to_catalog_item(
+                preset,
+                active_preset=active_preset,
+            )
+            for preset in list_retrieval_presets()
+        ],
     )
 
 
@@ -1293,15 +1349,20 @@ def get_run_retrieval_hits(
 
 @router.post("/search", response_model=StableSearchResponse)
 async def search_documents(payload: StableSearchRequest) -> StableSearchResponse:
+    legacy_payload = {
+        "query": payload.query,
+        "index_version_id": payload.index_version_id,
+        "filters": payload.filters,
+        "preset": payload.preset,
+    }
+    if "top_k" in payload.model_fields_set:
+        legacy_payload["top_k"] = payload.top_k
+    if "rerank_top_k" in payload.model_fields_set:
+        legacy_payload["rerank_top_k"] = payload.rerank_top_k
+
     try:
         legacy_response = await documentary_search_documents(
-            DocumentarySearchRequest(
-                query=payload.query,
-                index_version_id=payload.index_version_id,
-                top_k=payload.top_k,
-                rerank_top_k=payload.rerank_top_k,
-                filters=payload.filters,
-            )
+            DocumentarySearchRequest(**legacy_payload)
         )
     except ValueError as exc:
         message = str(exc)

@@ -28,6 +28,7 @@ class DocumentaryProjectConfig(BaseModel):
 
     metadata_registry: MetadataRegistryConfig
     chunking_strategy: str
+    retrieval_presets: str
     retrieval_preset: str
     enrichers: list[EnricherConfig] = Field(default_factory=list)
 

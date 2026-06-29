@@ -48,6 +48,11 @@ from app.services.documentary.metadata_validation import (
     validate_metadata,
     validate_retrieval_filters,
 )
+from app.services.documentary.retrieval_presets import (
+    RerankingStrategy,
+    RetrievalPlan,
+    resolve_retrieval_plan,
+)
 
 from app.services.ai.factory import (
     get_embedding_client,
@@ -360,6 +365,7 @@ class SearchRequest(BaseModel):
     top_k: int = Field(default_factory=_default_search_top_k)
     rerank_top_k: int = Field(default_factory=_default_rerank_top_k)
     filters: SearchMetadataFilters | None = None
+    preset: str | None = Field(default=None, min_length=1)
 
 
 class SearchHit(BaseModel):
@@ -389,6 +395,7 @@ class GenerateNoteRequest(BaseModel):
     top_k: int = Field(default_factory=_default_search_top_k)
     rerank_top_k: int = Field(default_factory=_default_rerank_top_k)
     filters: SearchMetadataFilters | None = None
+    preset: str | None = Field(default=None, min_length=1)
     prompt_version: str = "note_riposte_v1"
 
 
@@ -434,6 +441,40 @@ def _validate_search_filters_or_422(
                     }
                     for issue in exc.issues
                 ],
+            },
+        ) from exc
+
+
+def _resolve_retrieval_plan_or_422(payload: SearchRequest) -> RetrievalPlan:
+    try:
+        return resolve_retrieval_plan(
+            requested_preset=payload.preset,
+            request_fields=set(payload.model_fields_set),
+            request_top_k=payload.top_k,
+            request_rerank_top_k=payload.rerank_top_k,
+            request_filters=_search_filter_payload(payload.filters),
+        )
+    except MetadataValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_retrieval_preset_or_filters",
+                "issues": [
+                    {
+                        "code": issue.code,
+                        "field": issue.field,
+                        "message": issue.message,
+                    }
+                    for issue in exc.issues
+                ],
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_retrieval_preset",
+                "message": str(exc),
             },
         ) from exc
 
@@ -1087,10 +1128,15 @@ async def preview_document_chunking(
 
 @router.post("/search", response_model=SearchResponse)
 async def search_documents(payload: SearchRequest) -> SearchResponse:
-    search_filters = _validate_search_filters_or_422(payload.filters)
+    search_plan = _resolve_retrieval_plan_or_422(payload)
+    search_filters = search_plan.filters
     registry = get_metadata_registry()
     embedding_client = get_embedding_client()
-    reranker = get_reranker_client()
+    reranker = (
+        get_reranker_client()
+        if search_plan.reranking_strategy is RerankingStrategy.configured_reranker
+        else None
+    )
     ai_backend_preset = get_ai_backend_preset_name()
     qdrant_filter = _build_qdrant_search_filter(search_filters)
     lexical_filter_sql, lexical_filter_params = _build_metadata_filter_sql(
@@ -1128,15 +1174,18 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                         {
                             "project": project_trace_payload(),
                             "query": payload.query,
-                            "top_k": payload.top_k,
-                            "rerank_top_k": payload.rerank_top_k,
+                            "top_k": search_plan.dense_top_k,
+                            "dense_top_k": search_plan.dense_top_k,
+                            "lexical_top_k": search_plan.lexical_top_k,
+                            "rerank_top_k": search_plan.rerank_top_k,
+                            "retrieval_preset": search_plan.trace_payload(),
                             "index_version_id": str(payload.index_version_id),
                             "ai_backend_preset": ai_backend_preset,
                             "vector_collection": index_version["vector_collection"],
                             "embedding_provider": embedding_client.provider,
                             "embedding_model": embedding_client.model,
-                            "reranker_provider": reranker.provider,
-                            "reranker_model": reranker.model,
+                            "reranker_provider": reranker.provider if reranker else None,
+                            "reranker_model": reranker.model if reranker else None,
                             "dense_weight": DENSE_WEIGHT,
                             "lexical_weight": LEXICAL_WEIGHT,
                             "metadata_filters": search_filters,
@@ -1201,7 +1250,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                 qdrant,
                 collection_name=index_version["vector_collection"],
                 query_vector=query_vector,
-                limit=payload.top_k,
+                limit=search_plan.dense_top_k,
                 query_filter=qdrant_filter,
             )
 
@@ -1258,7 +1307,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                         lexical_query,
                         payload.index_version_id,
                         *lexical_filter_params,
-                        payload.top_k,
+                        search_plan.lexical_top_k,
                     ),
                 )
                 lexical_hits = cur.fetchall()
@@ -1282,8 +1331,11 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                             {
                                 "project": project_trace_payload(),
                                 "hits": 0,
-                                "top_k": payload.top_k,
-                                "rerank_top_k": payload.rerank_top_k,
+                                "top_k": search_plan.dense_top_k,
+                                "dense_top_k": search_plan.dense_top_k,
+                                "lexical_top_k": search_plan.lexical_top_k,
+                                "rerank_top_k": search_plan.rerank_top_k,
+                                "retrieval_preset": search_plan.trace_payload(),
                                 "ai_backend_preset": ai_backend_preset,
                                 "dense_hits": len(dense_hits),
                                 "lexical_hits": len(lexical_hits),
@@ -1328,7 +1380,7 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                 fused.append((row, fused_score, dense_norm, lexical_norm))
 
             fused.sort(key=lambda item: item[1], reverse=True)
-            fused = fused[: payload.rerank_top_k]
+            fused = fused[: search_plan.rerank_top_k]
             initial_rank_by_chunk_id = {
                 str(row["id"]): rank
                 for rank, (row, _, _, _) in enumerate(fused, start=1)
@@ -1342,99 +1394,143 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                 )
                 for row, _, _, _ in fused
             ]
-
-            cur.execute(
-                """
-                INSERT INTO model_calls (
-                    run_id,
-                    call_type,
-                    provider,
-                    model,
-                    input_hash,
-                    parameters,
-                    response_metadata
-                )
-                VALUES (%s, 'reranking', %s, %s, %s, %s::jsonb, %s::jsonb)
-                RETURNING id
-                """,
-                (
-                    run_id,
-                    reranker.provider,
-                    reranker.model,
-                    _json_trace_hash(
-                        {
-                            "query": payload.query,
-                            "candidate_ids": [candidate.id for candidate in candidates],
-                            "top_k": payload.rerank_top_k,
-                        }
-                    ),
-                    json.dumps(
-                        {
-                            "top_k": payload.rerank_top_k,
-                            "candidates_count": len(candidates),
-                        }
-                    ),
-                    json.dumps(_adapter_response_metadata(reranker)),
-                ),
-            )
-            rerank_model_call_id = cur.fetchone()["id"]
-
-            reranked = await reranker.rerank(
-                payload.query,
-                candidates,
-                top_k=payload.rerank_top_k,
-            )
             row_by_id = {str(row["id"]): row for row, _, _, _ in fused}
 
             final_hits = []
-            for item in reranked:
-                row = row_by_id[item.id]
-
-                dense_norm = next(
-                    dense for candidate_row, _, dense, _ in fused
-                    if str(candidate_row["id"]) == item.id
-                )
-                lexical_norm = next(
-                    lexical for candidate_row, _, _, lexical in fused
-                    if str(candidate_row["id"]) == item.id
-                )
-
+            rerank_model_call_id = None
+            if search_plan.reranking_strategy is RerankingStrategy.configured_reranker:
                 cur.execute(
                     """
-                    INSERT INTO retrieval_hits (
+                    INSERT INTO model_calls (
                         run_id,
-                        chunk_id,
-                        rank_initial,
-                        rank_final,
-                        dense_score,
-                        lexical_score,
-                        rerank_score,
-                        model_call_id
+                        call_type,
+                        provider,
+                        model,
+                        input_hash,
+                        parameters,
+                        response_metadata
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, 'reranking', %s, %s, %s, %s::jsonb, %s::jsonb)
+                    RETURNING id
                     """,
                     (
                         run_id,
-                        item.id,
-                        initial_rank_by_chunk_id.get(item.id),
-                        item.rank,
-                        dense_norm,
-                        lexical_norm,
-                        item.score,
-                        rerank_model_call_id,
+                        reranker.provider,
+                        reranker.model,
+                        _json_trace_hash(
+                            {
+                                "query": payload.query,
+                                "candidate_ids": [
+                                    candidate.id for candidate in candidates
+                                ],
+                                "top_k": search_plan.rerank_top_k,
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "top_k": search_plan.rerank_top_k,
+                                "candidates_count": len(candidates),
+                            }
+                        ),
+                        json.dumps(_adapter_response_metadata(reranker)),
                     ),
                 )
+                rerank_model_call_id = cur.fetchone()["id"]
 
-                final_hits.append(
-                    SearchHit(
-                        chunk_id=row["id"],
-                        document_id=row["document_id"],
-                        rank=item.rank,
-                        score=item.score,
-                        content=row["content"],
-                        metadata=row["metadata"] or {},
-                    )
+                reranked = await reranker.rerank(
+                    payload.query,
+                    candidates,
+                    top_k=search_plan.rerank_top_k,
                 )
+                for item in reranked:
+                    row = row_by_id[item.id]
+
+                    dense_norm = next(
+                        dense for candidate_row, _, dense, _ in fused
+                        if str(candidate_row["id"]) == item.id
+                    )
+                    lexical_norm = next(
+                        lexical for candidate_row, _, _, lexical in fused
+                        if str(candidate_row["id"]) == item.id
+                    )
+
+                    cur.execute(
+                        """
+                        INSERT INTO retrieval_hits (
+                            run_id,
+                            chunk_id,
+                            rank_initial,
+                            rank_final,
+                            dense_score,
+                            lexical_score,
+                            rerank_score,
+                            model_call_id
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            run_id,
+                            item.id,
+                            initial_rank_by_chunk_id.get(item.id),
+                            item.rank,
+                            dense_norm,
+                            lexical_norm,
+                            item.score,
+                            rerank_model_call_id,
+                        ),
+                    )
+
+                    final_hits.append(
+                        SearchHit(
+                            chunk_id=row["id"],
+                            document_id=row["document_id"],
+                            rank=item.rank,
+                            score=item.score,
+                            content=row["content"],
+                            metadata=row["metadata"] or {},
+                        )
+                    )
+            else:
+                for rank, (row, fused_score, dense_norm, lexical_norm) in enumerate(
+                    fused,
+                    start=1,
+                ):
+                    cur.execute(
+                        """
+                        INSERT INTO retrieval_hits (
+                            run_id,
+                            chunk_id,
+                            rank_initial,
+                            rank_final,
+                            dense_score,
+                            lexical_score,
+                            rerank_score,
+                            model_call_id
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            run_id,
+                            row["id"],
+                            rank,
+                            rank,
+                            dense_norm,
+                            lexical_norm,
+                            None,
+                            None,
+                        ),
+                    )
+
+                    final_hits.append(
+                        SearchHit(
+                            chunk_id=row["id"],
+                            document_id=row["document_id"],
+                            rank=rank,
+                            score=fused_score,
+                            content=row["content"],
+                            metadata=row["metadata"] or {},
+                        )
+                    )
 
             cur.execute(
                 """
@@ -1449,8 +1545,11 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                         {
                             "project": project_trace_payload(),
                             "hits": len(final_hits),
-                            "top_k": payload.top_k,
-                            "rerank_top_k": payload.rerank_top_k,
+                            "top_k": search_plan.dense_top_k,
+                            "dense_top_k": search_plan.dense_top_k,
+                            "lexical_top_k": search_plan.lexical_top_k,
+                            "rerank_top_k": search_plan.rerank_top_k,
+                            "retrieval_preset": search_plan.trace_payload(),
                             "ai_backend_preset": ai_backend_preset,
                             "dense_hits": len(dense_hits),
                             "lexical_hits": len(lexical_hits),
@@ -1462,8 +1561,8 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                             "embedding_provider": embedding_client.provider,
                             "embedding_model": embedding_client.model,
                             "embedding_dimension": query_embedding.dimension,
-                            "reranker_provider": reranker.provider,
-                            "reranker_model": reranker.model,
+                            "reranker_provider": reranker.provider if reranker else None,
+                            "reranker_model": reranker.model if reranker else None,
                             "dense_weight": DENSE_WEIGHT,
                             "lexical_weight": LEXICAL_WEIGHT,
                             "metadata_filters": search_filters,
@@ -1480,15 +1579,19 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
 async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
     llm = get_llm_client()
     ai_backend_preset = get_ai_backend_preset_name()
+    search_payload = {
+        "query": payload.query,
+        "index_version_id": payload.index_version_id,
+        "filters": payload.filters,
+        "preset": payload.preset,
+    }
+    if "top_k" in payload.model_fields_set:
+        search_payload["top_k"] = payload.top_k
+    if "rerank_top_k" in payload.model_fields_set:
+        search_payload["rerank_top_k"] = payload.rerank_top_k
 
     search_response = await search_documents(
-        SearchRequest(
-            query=payload.query,
-            index_version_id=payload.index_version_id,
-            top_k=payload.top_k,
-            rerank_top_k=payload.rerank_top_k,
-            filters=payload.filters,
-        )
+        SearchRequest(**search_payload)
     )
 
     context_blocks = []
