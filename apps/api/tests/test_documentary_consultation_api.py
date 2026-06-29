@@ -224,6 +224,20 @@ class FakeCursor:
             }
             return
 
+        if "FROM runs" in compact_query and "COUNT(*) OVER()" in compact_query:
+            self._result = [
+                {
+                    "run_id": RUN_ID,
+                    "run_type": "retrieval",
+                    "status": "succeeded",
+                    "index_version_id": INDEX_VERSION_ID,
+                    "started_at": now,
+                    "finished_at": now,
+                    "total_count": 1,
+                }
+            ]
+            return
+
         if "FROM runs" in compact_query:
             self._result = {
                 "run_id": RUN_ID,
@@ -284,8 +298,8 @@ def _patch_connection(monkeypatch):
     monkeypatch.setattr(consultation, "get_connection", lambda: FakeConnection())
 
 
-def test_metadata_catalog_exposes_registry_contract():
-    response = consultation.get_metadata_catalog()
+def test_metadata_schema_exposes_registry_contract():
+    response = consultation.get_metadata_schema()
 
     item = response.fields["document_type"]
     assert item.kind == "project_business"
@@ -349,31 +363,30 @@ def test_retrieval_preset_catalog_exposes_active_preset():
     )
 
 
-def test_api_v1_alias_is_mounted():
+def test_api_generic_routes_are_mounted():
     paths = {route.path for route in app.routes}
 
-    assert "/v1/search/capabilities" in paths
-    assert "/api/v1/search/capabilities" in paths
-    assert "/v1/chunking/strategies" in paths
-    assert "/api/v1/chunking/strategies" in paths
-    assert "/v1/loaders" in paths
-    assert "/api/v1/loaders" in paths
-    assert "/v1/enrichers" in paths
-    assert "/api/v1/enrichers" in paths
-    assert "/v1/retrieval/presets" in paths
-    assert "/api/v1/retrieval/presets" in paths
-    assert "/v1/search" in paths
-    assert "/api/v1/search" in paths
+    assert "/api/search/capabilities" in paths
+    assert "/api/chunking/strategies" in paths
+    assert "/api/loaders" in paths
+    assert "/api/enrichers" in paths
+    assert "/api/retrieval/presets" in paths
+    assert "/api/search" in paths
+    assert "/api/documents" in paths
+    assert "/api/documents/{document_id}" in paths
+    assert "/api/documents/{document_id}/chunks" in paths
+    assert "/api/metadata/schema" in paths
+    assert "/api/runs" in paths
+    assert "/api/runs/{run_id}" in paths
 
 
-def test_legacy_create_source_endpoint_is_deprecated_in_openapi():
-    routes = [
-        route for route in app.routes
-        if getattr(route, "path", None) == "/documentary/sources"
-    ]
+def test_legacy_documentary_routes_are_not_mounted():
+    paths = {route.path for route in app.routes}
 
-    assert routes
-    assert routes[0].deprecated is True
+    assert "/documentary/sources" not in paths
+    assert "/api/documentary/search" not in paths
+    assert "/v1/search" not in paths
+    assert "/api/v1/search" not in paths
 
 
 def test_search_capabilities_distinguish_implemented_and_planned_filters():
@@ -493,6 +506,24 @@ def test_document_extraction_is_page_limited_and_can_hide_text(monkeypatch):
     assert len(response.pages) == 1
     assert response.pages[0].page == 2
     assert response.pages[0].text is None
+
+
+def test_runs_list_is_paginated_and_filterable(monkeypatch):
+    _patch_connection(monkeypatch)
+
+    response = consultation.list_runs(
+        limit=25,
+        offset=0,
+        run_type="retrieval",
+        status="succeeded",
+        index_version_id=INDEX_VERSION_ID,
+    )
+
+    assert response.total == 1
+    assert response.limit == 25
+    assert response.items[0].run_id == RUN_ID
+    assert response.items[0].run_type == "retrieval"
+    assert response.items[0].status == "succeeded"
 
 
 def test_run_detail_masks_prompt_and_provider_raw_payload(monkeypatch):

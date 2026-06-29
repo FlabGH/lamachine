@@ -38,7 +38,7 @@ from app.services.documentary.structured_objects import (
 from app.services.documentary.vector_store import get_qdrant_client, search_points
 
 
-router = APIRouter(prefix="/v1", tags=["consultation"])
+router = APIRouter(tags=["api"])
 
 MAX_LIMIT = 100
 DEFAULT_LIMIT = 50
@@ -60,7 +60,7 @@ class PaginatedResponse(StrictModel):
     total: int
 
 
-class MetadataCatalogItem(StrictModel):
+class MetadataSchemaItem(StrictModel):
     kind: str
     type: str
     scopes: list[str]
@@ -75,8 +75,8 @@ class MetadataCatalogItem(StrictModel):
     description: str
 
 
-class MetadataCatalogResponse(StrictModel):
-    fields: dict[str, MetadataCatalogItem]
+class MetadataSchemaResponse(StrictModel):
+    fields: dict[str, MetadataSchemaItem]
 
 
 class ChunkingStrategyCatalogItem(StrictModel):
@@ -307,6 +307,19 @@ class RunDetail(StrictModel):
     finished_at: datetime | None = None
 
 
+class RunSummary(StrictModel):
+    run_id: UUID
+    run_type: str
+    status: str
+    index_version_id: UUID | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class RunListResponse(PaginatedResponse):
+    items: list[RunSummary]
+
+
 class RetrievalHitDetail(StrictModel):
     retrieval_hit_id: UUID
     run_id: UUID
@@ -353,8 +366,8 @@ class StableSearchResponse(StrictModel):
     hits: list[StableSearchHit]
 
 
-def _entry_to_catalog_item(entry: MetadataFieldDefinition) -> MetadataCatalogItem:
-    return MetadataCatalogItem(
+def _entry_to_schema_item(entry: MetadataFieldDefinition) -> MetadataSchemaItem:
+    return MetadataSchemaItem(
         kind=entry.kind.value,
         type=entry.type.value,
         scopes=[scope.value for scope in entry.scopes],
@@ -496,12 +509,12 @@ def _qdrant_point_count(collection_name: str) -> int:
         ) from exc
 
 
-@router.get("/metadata/catalog", response_model=MetadataCatalogResponse)
-def get_metadata_catalog() -> MetadataCatalogResponse:
+@router.get("/metadata/schema", response_model=MetadataSchemaResponse)
+def get_metadata_schema() -> MetadataSchemaResponse:
     registry = get_metadata_registry()
-    return MetadataCatalogResponse(
+    return MetadataSchemaResponse(
         fields={
-            name: _entry_to_catalog_item(entry)
+            name: _entry_to_schema_item(entry)
             for name, entry in registry.fields.items()
         }
     )
@@ -1259,6 +1272,57 @@ def get_document_extraction(
         page_from=page_from,
         page_to=page_to,
         total_pages=len(pages),
+    )
+
+
+@router.get("/runs", response_model=RunListResponse)
+def list_runs(
+    limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    run_type: str | None = None,
+    status: str | None = None,
+    index_version_id: UUID | None = None,
+) -> RunListResponse:
+    conditions: list[str] = []
+    params: list[Any] = []
+    if run_type:
+        conditions.append("run_type = %s")
+        params.append(run_type.strip())
+    if status:
+        conditions.append("status = %s")
+        params.append(status.strip())
+    if index_version_id:
+        conditions.append("index_version_id = %s")
+        params.append(index_version_id)
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    bounded_limit = _bounded_limit(limit)
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    id AS run_id,
+                    run_type,
+                    status::text AS status,
+                    index_version_id,
+                    started_at,
+                    finished_at,
+                    COUNT(*) OVER()::int AS total_count
+                FROM runs
+                {where_sql}
+                ORDER BY started_at DESC, id DESC
+                LIMIT %s OFFSET %s
+                """,
+                (*params, bounded_limit, offset),
+            )
+            rows = cur.fetchall()
+
+    return RunListResponse(
+        items=[RunSummary(**_without_total_count(row)) for row in rows],
+        limit=bounded_limit,
+        offset=offset,
+        total=_total(rows[0] if rows else None),
     )
 
 

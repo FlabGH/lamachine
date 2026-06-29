@@ -78,8 +78,8 @@ def test_project_config_api_endpoint_is_exposed(monkeypatch):
 
     paths = {route.path for route in app.routes}
 
-    assert "/project/config" in paths
     assert "/api/project/config" in paths
+    assert "/project/config" not in paths
     assert get_project_config_endpoint().model_dump() == (
         project_config.get_project_config().model_dump()
     )
