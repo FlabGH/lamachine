@@ -267,10 +267,10 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
     from app.db import get_connection
     from app.services.ai.factory import get_ocr_client
     from app.services.documentary.ingestion import (
-        extract_pdf_with_optional_ocr,
         save_uploaded_file,
         sha256_bytes,
     )
+    from app.services.documentary.loaders import LoaderInput, get_loader
     from app.services.documentary.metadata_registry import MetadataScope, get_metadata_registry
     from app.services.documentary.metadata_validation import validate_metadata
 
@@ -279,7 +279,14 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
     content = file_path.read_bytes()
     digest = sha256_bytes(content)
     storage_path, _ = save_uploaded_file(file_path.name, content)
-    extraction = await extract_pdf_with_optional_ocr(storage_path, ocr_client=get_ocr_client())
+    loader_result = await get_loader("pdf_pypdf_ocr_v1").load(
+        LoaderInput(
+            mime_type="application/pdf",
+            filename=file_path.name,
+            path=storage_path,
+            ocr_client=get_ocr_client(),
+        )
+    )
     source_id = uuid4()
     document_id = uuid4()
     document_metadata = validate_metadata(
@@ -322,7 +329,7 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
                     file_path.name,
                     storage_path,
                     digest,
-                    extraction.raw_text,
+                    loader_result.raw_text,
                     json.dumps(document_metadata, ensure_ascii=False),
                 ),
             )
@@ -340,6 +347,7 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
                         {
                             "filename": file_path.name,
                             "source_code": metadata["source_code"],
+                            "loader": loader_result.trace.metadata(),
                             "metadata": document_metadata,
                         },
                         ensure_ascii=False,
@@ -347,7 +355,7 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
                     json.dumps(
                         {
                             "document_id": str(document_id),
-                            **extraction.metadata(),
+                            **loader_result.metadata(),
                         },
                         ensure_ascii=False,
                     ),
