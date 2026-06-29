@@ -1,7 +1,10 @@
+import asyncio
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import UUID
 
 
 def _load_eval_module():
@@ -84,6 +87,121 @@ def test_chunking_config_from_args_uses_canonical_strategy_defaults():
     assert default_config.chunking_version == "generic_window_v1"
     assert structural_config.split_strategy == "generic_recursive_v1"
     assert structural_config.chunking_version == "generic_recursive_v1"
+
+
+def test_ingest_document_uses_pdf_loader(monkeypatch, tmp_path):
+    module = _load_eval_module()
+    module._configure_imports()
+
+    from app.services.ai import factory
+    from app.services.documentary import ingestion, loaders
+
+    executions = []
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query, params=None):
+            executions.append((query, params))
+
+        def fetchone(self):
+            query = executions[-1][0]
+            if "INSERT INTO sources" in query:
+                return {"id": UUID("00000000-0000-0000-0000-000000000001")}
+            if "INSERT INTO documents" in query:
+                return {"id": UUID("00000000-0000-0000-0000-000000000002")}
+            return {}
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+    class FakeTrace:
+        def metadata(self):
+            return {
+                "name": "pdf_pypdf_ocr_v1",
+                "version": "1",
+                "mime_type": "application/pdf",
+                "file_extension": "pdf",
+                "status": "success",
+                "warnings": [],
+                "errors": [],
+                "ocr_used": False,
+                "ocr_provider": None,
+                "ocr_model": None,
+            }
+
+    class FakeLoaderResult:
+        raw_text = "Texte charge par loader"
+        status = "success"
+        trace = FakeTrace()
+
+        def metadata(self):
+            return {
+                "loader": self.trace.metadata(),
+                "extraction": {
+                    "method": "pdf_pypdf_ocr_v1",
+                    "status": "success",
+                    "warnings": [],
+                    "errors": [],
+                    "ocr_used": False,
+                },
+                "extracted_pages": [],
+            }
+
+    class FakeLoader:
+        async def load(self, input):
+            assert input.path == "/tmp/runner.pdf"
+            assert input.filename == "runner.pdf"
+            assert input.ocr_client == "ocr"
+            return FakeLoaderResult()
+
+    file_path = tmp_path / "runner.pdf"
+    file_path.write_bytes(b"%PDF runner")
+
+    monkeypatch.setattr(
+        ingestion,
+        "save_uploaded_file",
+        lambda filename, content: ("/tmp/runner.pdf", "digest"),
+    )
+    monkeypatch.setattr(factory, "get_ocr_client", lambda: "ocr")
+    monkeypatch.setattr(loaders, "get_loader", lambda name: FakeLoader())
+    monkeypatch.setattr("app.db.get_connection", lambda: FakeConnection())
+
+    document_id = asyncio.run(
+        module._ingest_document(
+            {
+                "file_path": file_path,
+                "metadata": {
+                    "title": "Runner PDF",
+                    "source_code": "runner",
+                },
+            }
+        )
+    )
+
+    assert document_id == UUID("00000000-0000-0000-0000-000000000002")
+    document_inserts = [
+        params for query, params in executions if "INSERT INTO documents" in query
+    ]
+    assert document_inserts[0][-2] == "Texte charge par loader"
+    run_inserts = [
+        params for query, params in executions if "INSERT INTO runs" in query
+    ]
+    input_payload = json.loads(run_inserts[0][2])
+    output_payload = json.loads(run_inserts[0][3])
+    assert input_payload["loader"]["name"] == "pdf_pypdf_ocr_v1"
+    assert output_payload["loader"]["name"] == "pdf_pypdf_ocr_v1"
 
 
 def test_load_queries_uses_canonical_expectations_without_roles(tmp_path):
