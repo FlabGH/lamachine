@@ -38,7 +38,7 @@ from app.services.documentary.structured_objects import (
 from app.services.documentary.vector_store import get_qdrant_client, search_points
 
 
-router = APIRouter(prefix="/v1", tags=["consultation"])
+router = APIRouter(tags=["api"])
 
 MAX_LIMIT = 100
 DEFAULT_LIMIT = 50
@@ -60,7 +60,7 @@ class PaginatedResponse(StrictModel):
     total: int
 
 
-class MetadataCatalogItem(StrictModel):
+class MetadataSchemaItem(StrictModel):
     kind: str
     type: str
     scopes: list[str]
@@ -75,8 +75,8 @@ class MetadataCatalogItem(StrictModel):
     description: str
 
 
-class MetadataCatalogResponse(StrictModel):
-    fields: dict[str, MetadataCatalogItem]
+class MetadataSchemaResponse(StrictModel):
+    fields: dict[str, MetadataSchemaItem]
 
 
 class ChunkingStrategyCatalogItem(StrictModel):
@@ -353,8 +353,8 @@ class StableSearchResponse(StrictModel):
     hits: list[StableSearchHit]
 
 
-def _entry_to_catalog_item(entry: MetadataFieldDefinition) -> MetadataCatalogItem:
-    return MetadataCatalogItem(
+def _entry_to_schema_item(entry: MetadataFieldDefinition) -> MetadataSchemaItem:
+    return MetadataSchemaItem(
         kind=entry.kind.value,
         type=entry.type.value,
         scopes=[scope.value for scope in entry.scopes],
@@ -496,12 +496,12 @@ def _qdrant_point_count(collection_name: str) -> int:
         ) from exc
 
 
-@router.get("/metadata/catalog", response_model=MetadataCatalogResponse)
-def get_metadata_catalog() -> MetadataCatalogResponse:
+@router.get("/metadata/schema", response_model=MetadataSchemaResponse)
+def get_metadata_schema() -> MetadataSchemaResponse:
     registry = get_metadata_registry()
-    return MetadataCatalogResponse(
+    return MetadataSchemaResponse(
         fields={
-            name: _entry_to_catalog_item(entry)
+            name: _entry_to_schema_item(entry)
             for name, entry in registry.fields.items()
         }
     )
