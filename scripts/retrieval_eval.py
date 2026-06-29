@@ -498,6 +498,7 @@ async def _run_query(
     index_version_id: UUID,
     top_k: int,
     rerank_top_k: int,
+    retrieval_preset: str | None,
 ) -> dict[str, Any]:
     from app.api.documentary import SearchRequest, search_documents
     from app.db import get_connection
@@ -509,6 +510,7 @@ async def _run_query(
             index_version_id=index_version_id,
             top_k=top_k,
             rerank_top_k=rerank_top_k,
+            preset=retrieval_preset,
         )
     )
     latency_ms = (time.perf_counter() - start_time) * 1000
@@ -622,6 +624,7 @@ def _write_report(
     chunk_metrics: dict[str, float],
     top_k: int,
     rerank_top_k: int,
+    retrieval_preset: str | None,
 ) -> None:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     query_count = len(query_reports)
@@ -643,6 +646,7 @@ def _write_report(
         f"Evaluation queries: `{queries_path.relative_to(REPO_ROOT)}`",
         f"Index version id: `{index_version_id}`",
         f"Vector collection: `{vector_collection}`",
+        f"Retrieval preset: `{retrieval_preset or 'project_default'}`",
         f"Top k: `{top_k}`",
         f"Rerank top k: `{rerank_top_k}`",
         "",
@@ -798,6 +802,7 @@ async def _run(args: argparse.Namespace) -> Path:
                 index_version_id,
                 args.top_k,
                 args.rerank_top_k,
+                args.retrieval_preset,
             )
         )
 
@@ -814,6 +819,7 @@ async def _run(args: argparse.Namespace) -> Path:
         chunk_metrics=chunk_metrics,
         top_k=args.top_k,
         rerank_top_k=args.rerank_top_k,
+        retrieval_preset=args.retrieval_preset,
     )
     return report_path
 
@@ -827,6 +833,7 @@ def main() -> None:
     parser.add_argument("--report", default=str(DEFAULT_REPORT.relative_to(REPO_ROOT)))
     parser.add_argument("--top-k", type=int, default=30)
     parser.add_argument("--rerank-top-k", type=int, default=20)
+    parser.add_argument("--retrieval-preset", default=None)
     parser.add_argument("--index-name", default=None)
     parser.add_argument("--vector-collection", default=None)
     parser.add_argument("--reuse-index-version-id", default=None)

@@ -58,6 +58,50 @@ def test_average_returns_zero_for_empty_values():
     assert module._average([10.0, 20.0]) == 15.0
 
 
+def test_write_report_includes_retrieval_preset(tmp_path):
+    module = _load_eval_module()
+    report_path = tmp_path / "report.md"
+
+    module._write_report(
+        report_path=report_path,
+        manifest_path=module.REPO_ROOT / "corpus" / "poc_ia" / "manifest.yaml",
+        queries_path=module.REPO_ROOT / "corpus" / "poc_ia" / "evaluation_queries.yaml",
+        index_version_id=UUID("00000000-0000-0000-0000-000000000001"),
+        vector_collection="test_collection",
+        query_reports=[
+            {
+                "query": module.QuerySpec(
+                    query_id="q1",
+                    query="Question",
+                    intent="test",
+                    expected_source_codes={"source"},
+                    expected_document_ids=set(),
+                    expected_theme_tags=set(),
+                    expected_pages=set(),
+                ),
+                "results": [],
+                "source_hit": False,
+                "document_hit": False,
+                "page_hit": True,
+                "source_mrr": 0.0,
+                "document_mrr": 0.0,
+                "page_coverage_rate": 0.0,
+                "latency_ms": 12.0,
+            }
+        ],
+        chunk_metrics={
+            "total_chunks": 0,
+            "missing_source_code_rate": 0.0,
+            "missing_page_range_rate": 0.0,
+        },
+        top_k=5,
+        rerank_top_k=3,
+        retrieval_preset="eval_v1",
+    )
+
+    assert "Retrieval preset: `eval_v1`" in report_path.read_text(encoding="utf-8")
+
+
 def test_chunking_config_from_args_uses_canonical_strategy_defaults():
     module = _load_eval_module()
     module._configure_imports()
