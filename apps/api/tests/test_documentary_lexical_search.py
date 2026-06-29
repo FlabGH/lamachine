@@ -60,6 +60,7 @@ def test_search_request_uses_poc_retrieval_defaults(monkeypatch):
     assert request.top_k == 30
     assert request.rerank_top_k == 20
     assert request.filters is None
+    assert request.preset is None
 
 
 def test_search_request_defaults_are_configurable_from_env(monkeypatch):

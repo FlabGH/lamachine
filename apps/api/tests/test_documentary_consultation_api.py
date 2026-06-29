@@ -333,6 +333,22 @@ def test_documentary_enricher_catalog_exposes_available_enrichers():
     assert items["noop_enricher_v1"].produces_structured_objects is False
 
 
+def test_retrieval_preset_catalog_exposes_active_preset():
+    response = consultation.get_retrieval_preset_catalog()
+
+    items = {item.name: item for item in response.items}
+    assert response.active_preset == "hybrid_dense_lexical_rerank_v1"
+    assert set(items) == {"hybrid_dense_lexical_rerank_v1"}
+    assert items["hybrid_dense_lexical_rerank_v1"].active is True
+    assert items["hybrid_dense_lexical_rerank_v1"].dense_top_k == 30
+    assert items["hybrid_dense_lexical_rerank_v1"].lexical_top_k == 30
+    assert items["hybrid_dense_lexical_rerank_v1"].rerank_top_k == 20
+    assert (
+        items["hybrid_dense_lexical_rerank_v1"].reranking_strategy
+        == "configured_reranker"
+    )
+
+
 def test_api_v1_alias_is_mounted():
     paths = {route.path for route in app.routes}
 
@@ -344,6 +360,8 @@ def test_api_v1_alias_is_mounted():
     assert "/api/v1/loaders" in paths
     assert "/v1/enrichers" in paths
     assert "/api/v1/enrichers" in paths
+    assert "/v1/retrieval/presets" in paths
+    assert "/api/v1/retrieval/presets" in paths
     assert "/v1/search" in paths
     assert "/api/v1/search" in paths
 
@@ -505,6 +523,8 @@ def test_stable_search_facade_reuses_documentary_search_and_adds_scores(monkeypa
 
     async def fake_search(payload):
         assert payload.filters.active_filters() == {"source_code": ["ps"]}
+        assert "top_k" not in payload.model_fields_set
+        assert "rerank_top_k" not in payload.model_fields_set
         return SimpleNamespace(
             run_id=RUN_ID,
             hits=[
