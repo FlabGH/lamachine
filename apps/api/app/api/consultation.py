@@ -307,6 +307,19 @@ class RunDetail(StrictModel):
     finished_at: datetime | None = None
 
 
+class RunSummary(StrictModel):
+    run_id: UUID
+    run_type: str
+    status: str
+    index_version_id: UUID | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class RunListResponse(PaginatedResponse):
+    items: list[RunSummary]
+
+
 class RetrievalHitDetail(StrictModel):
     retrieval_hit_id: UUID
     run_id: UUID
@@ -1259,6 +1272,57 @@ def get_document_extraction(
         page_from=page_from,
         page_to=page_to,
         total_pages=len(pages),
+    )
+
+
+@router.get("/runs", response_model=RunListResponse)
+def list_runs(
+    limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    offset: int = Query(0, ge=0),
+    run_type: str | None = None,
+    status: str | None = None,
+    index_version_id: UUID | None = None,
+) -> RunListResponse:
+    conditions: list[str] = []
+    params: list[Any] = []
+    if run_type:
+        conditions.append("run_type = %s")
+        params.append(run_type.strip())
+    if status:
+        conditions.append("status = %s")
+        params.append(status.strip())
+    if index_version_id:
+        conditions.append("index_version_id = %s")
+        params.append(index_version_id)
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    bounded_limit = _bounded_limit(limit)
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    id AS run_id,
+                    run_type,
+                    status::text AS status,
+                    index_version_id,
+                    started_at,
+                    finished_at,
+                    COUNT(*) OVER()::int AS total_count
+                FROM runs
+                {where_sql}
+                ORDER BY started_at DESC, id DESC
+                LIMIT %s OFFSET %s
+                """,
+                (*params, bounded_limit, offset),
+            )
+            rows = cur.fetchall()
+
+    return RunListResponse(
+        items=[RunSummary(**_without_total_count(row)) for row in rows],
+        limit=bounded_limit,
+        offset=offset,
+        total=_total(rows[0] if rows else None),
     )
 
 

@@ -224,6 +224,20 @@ class FakeCursor:
             }
             return
 
+        if "FROM runs" in compact_query and "COUNT(*) OVER()" in compact_query:
+            self._result = [
+                {
+                    "run_id": RUN_ID,
+                    "run_type": "retrieval",
+                    "status": "succeeded",
+                    "index_version_id": INDEX_VERSION_ID,
+                    "started_at": now,
+                    "finished_at": now,
+                    "total_count": 1,
+                }
+            ]
+            return
+
         if "FROM runs" in compact_query:
             self._result = {
                 "run_id": RUN_ID,
@@ -362,6 +376,7 @@ def test_api_generic_routes_are_mounted():
     assert "/api/documents/{document_id}" in paths
     assert "/api/documents/{document_id}/chunks" in paths
     assert "/api/metadata/schema" in paths
+    assert "/api/runs" in paths
     assert "/api/runs/{run_id}" in paths
 
 
@@ -491,6 +506,24 @@ def test_document_extraction_is_page_limited_and_can_hide_text(monkeypatch):
     assert len(response.pages) == 1
     assert response.pages[0].page == 2
     assert response.pages[0].text is None
+
+
+def test_runs_list_is_paginated_and_filterable(monkeypatch):
+    _patch_connection(monkeypatch)
+
+    response = consultation.list_runs(
+        limit=25,
+        offset=0,
+        run_type="retrieval",
+        status="succeeded",
+        index_version_id=INDEX_VERSION_ID,
+    )
+
+    assert response.total == 1
+    assert response.limit == 25
+    assert response.items[0].run_id == RUN_ID
+    assert response.items[0].run_type == "retrieval"
+    assert response.items[0].status == "succeeded"
 
 
 def test_run_detail_masks_prompt_and_provider_raw_payload(monkeypatch):
