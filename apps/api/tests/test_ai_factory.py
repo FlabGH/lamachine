@@ -132,7 +132,7 @@ class TestAIClientFactory:
         assert client.provider == "mistral"
 
     def test_embedding_client_can_be_selected_from_preset(self, monkeypatch):
-        monkeypatch.setenv("AI_BACKEND_PRESET", "poc-mistral-jina")
+        monkeypatch.setenv("AI_BACKEND_PRESET", "mistral-jina")
 
         client = get_embedding_client()
 
@@ -140,7 +140,7 @@ class TestAIClientFactory:
         assert client.provider == "mistral"
 
     def test_embedding_preset_overrides_provider_env(self, monkeypatch):
-        monkeypatch.setenv("AI_BACKEND_PRESET", "poc-mistral-jina")
+        monkeypatch.setenv("AI_BACKEND_PRESET", "mistral-jina")
         monkeypatch.setenv("EMBEDDING_PROVIDER", "local")
 
         client = get_embedding_client()
@@ -179,7 +179,7 @@ class TestAIClientFactory:
         assert client.provider == "jina"
 
     def test_reranker_client_can_be_selected_from_preset(self, monkeypatch):
-        monkeypatch.setenv("AI_BACKEND_PRESET", "poc-mistral-jina")
+        monkeypatch.setenv("AI_BACKEND_PRESET", "mistral-jina")
 
         client = get_reranker_client()
 
@@ -233,7 +233,7 @@ class TestAIClientFactory:
         assert client.provider == "mistral"
 
     def test_llm_client_can_be_selected_from_preset(self, monkeypatch):
-        monkeypatch.setenv("AI_BACKEND_PRESET", "poc-mistral-jina")
+        monkeypatch.setenv("AI_BACKEND_PRESET", "mistral-jina")
 
         client = get_llm_client()
 

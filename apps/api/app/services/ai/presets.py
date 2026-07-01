@@ -19,14 +19,14 @@ AI_BACKEND_PRESETS: dict[str, AIBackendPreset] = {
         reranker_provider="local",
         llm_provider="local",
     ),
-    "poc-mistral-jina": AIBackendPreset(
-        name="poc-mistral-jina",
+    "mistral-jina": AIBackendPreset(
+        name="mistral-jina",
         embedding_provider="mistral",
         reranker_provider="jina",
         llm_provider="mistral",
     ),
-    "poc-hybrid": AIBackendPreset(
-        name="poc-hybrid",
+    "mistral-local-rerank": AIBackendPreset(
+        name="mistral-local-rerank",
         embedding_provider="mistral",
         reranker_provider="local",
         llm_provider="mistral",

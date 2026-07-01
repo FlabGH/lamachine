@@ -13,7 +13,7 @@ def normalize_psycopg_url(url: str) -> str:
 DATABASE_URL = normalize_psycopg_url(
     os.getenv(
         "DATABASE_URL",
-        "postgresql://lamachine:lamachine@postgres:5432/lamachine",
+        "postgresql://lapythie:lapythie@postgres:5432/lapythie",
     )
 )
 
