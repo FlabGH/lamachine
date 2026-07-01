@@ -35,7 +35,6 @@ class FakeCursor:
         now = datetime(2026, 6, 14, tzinfo=UTC)
         metadata = {
             "source_code": "ps",
-            "role_documentaire": "doctrine_alliee",
             "theme_tags": ["ia", "service_public"],
             "visibility_scope": "public",
             "access_level": "open",
@@ -134,7 +133,6 @@ class FakeCursor:
             self._result = {
                 "chunk_count": 1,
                 "chunks_without_source_code": 0,
-                "chunks_without_role_documentaire": 0,
                 "chunks_without_pages": 0,
             }
             return
@@ -151,7 +149,7 @@ class FakeCursor:
                 "document_id": DOCUMENT_ID,
                 "source_id": SOURCE_ID,
                 "source_code": "ps",
-                "title": "Programme PS IA",
+                "title": "Sample document",
                 "filename": "ps.pdf",
                 "mime_type": "application/pdf",
                 "status": "indexed",
@@ -167,7 +165,7 @@ class FakeCursor:
                     "document_id": DOCUMENT_ID,
                     "source_id": SOURCE_ID,
                     "source_code": "ps",
-                    "title": "Programme PS IA",
+                    "title": "Sample document",
                     "filename": "ps.pdf",
                     "mime_type": "application/pdf",
                     "status": "indexed",
@@ -182,7 +180,7 @@ class FakeCursor:
         if "SELECT id, title, metadata FROM documents" in compact_query:
             self._result = {
                 "id": DOCUMENT_ID,
-                "title": "Programme PS IA",
+                "title": "Sample document",
                 "metadata": metadata,
             }
             return
@@ -309,7 +307,6 @@ def test_metadata_schema_exposes_registry_contract():
     assert item.values_owner == "project"
     assert item.values is None
     assert item.description == "Functional category defined by the project."
-    assert "role_documentaire" not in response.fields
     assert response.fields["source_code"].project_input == "required"
     assert response.fields["theme_tags"].project_input == "optional"
     assert response.fields["document_id"].project_input == "forbidden"
@@ -378,15 +375,6 @@ def test_api_generic_routes_are_mounted():
     assert "/api/metadata/schema" in paths
     assert "/api/runs" in paths
     assert "/api/runs/{run_id}" in paths
-
-
-def test_legacy_documentary_routes_are_not_mounted():
-    paths = {route.path for route in app.routes}
-
-    assert "/documentary/sources" not in paths
-    assert "/api/documentary/search" not in paths
-    assert "/v1/search" not in paths
-    assert "/api/v1/search" not in paths
 
 
 def test_search_capabilities_distinguish_implemented_and_planned_filters():

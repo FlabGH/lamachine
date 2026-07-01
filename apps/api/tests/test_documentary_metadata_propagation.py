@@ -88,7 +88,7 @@ class FakeCursor:
             self._result = {
                 "id": DOCUMENT_ID,
                 "source_id": SOURCE_ID,
-                "document_title": "Document metadata",
+                "title": "Document metadata",
                 "raw_text": (
                     "[PAGE 2] [SECTION Metadata] Les metadata enrichies doivent "
                     "etre conservees dans les chunks et les hits de recherche."

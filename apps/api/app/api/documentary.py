@@ -56,7 +56,6 @@ from app.services.documentary.retrieval_presets import (
 
 from app.services.ai.factory import (
     get_embedding_client,
-    get_llm_client,
     get_ocr_client,
     get_reranker_client,
 )
@@ -70,18 +69,17 @@ from app.services.documentary.vector_store import (
 from app.services.ai.clients import RerankCandidate
 from app.services.documentary.vector_store import search_chunks
 
-from app.services.ai.clients import LLMMessage
 from app.services.project_config import get_project_config, project_trace_payload
 
-router = APIRouter(prefix="/documentary", tags=["documentary"])
+router = APIRouter(tags=["documentary"])
 
 
 DENSE_WEIGHT = 0.6
 LEXICAL_WEIGHT = 0.4
 DEFAULT_SEARCH_TOP_K_ENV = "DOCUMENTARY_SEARCH_TOP_K"
 DEFAULT_RERANK_TOP_K_ENV = "DOCUMENTARY_RERANK_TOP_K"
-POC_DEFAULT_SEARCH_TOP_K = 30
-POC_DEFAULT_RERANK_TOP_K = 20
+DEFAULT_SEARCH_TOP_K = 30
+DEFAULT_RERANK_TOP_K = 20
 LEXICAL_SEARCH_CONFIG = "french"
 LEXICAL_MAX_QUERY_TERMS = 12
 LEXICAL_MIN_TERM_LENGTH = 3
@@ -123,8 +121,8 @@ concat_ws(
     ' ',
     content,
     replace(COALESCE(metadata->>'source_code', ''), '_', ' '),
-    replace(COALESCE(metadata->>'document_title', ''), '_', ' '),
-    replace(COALESCE(metadata->>'role_documentaire', ''), '_', ' '),
+    replace(COALESCE(metadata->>'title', ''), '_', ' '),
+    replace(COALESCE(metadata->>'section_title', ''), '_', ' '),
     replace(COALESCE(metadata->>'theme_tags', ''), '_', ' ')
 )
 """
@@ -220,11 +218,11 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _default_search_top_k() -> int:
-    return _env_int(DEFAULT_SEARCH_TOP_K_ENV, POC_DEFAULT_SEARCH_TOP_K)
+    return _env_int(DEFAULT_SEARCH_TOP_K_ENV, DEFAULT_SEARCH_TOP_K)
 
 
 def _default_rerank_top_k() -> int:
-    return _env_int(DEFAULT_RERANK_TOP_K_ENV, POC_DEFAULT_RERANK_TOP_K)
+    return _env_int(DEFAULT_RERANK_TOP_K_ENV, DEFAULT_RERANK_TOP_K)
 
 
 def _adapter_response_metadata(client, raw: dict | None = None) -> dict:
@@ -239,14 +237,6 @@ class RunStatus(str, Enum):
     running = "running"
     succeeded = "succeeded"
     failed = "failed"
-
-
-class OutputPersona(str, Enum):
-    base = "base"
-    elu = "elu"
-    porte_parole = "porte_parole"
-    militant = "militant"
-    presse = "presse"
 
 
 class SourceCreate(BaseModel):
@@ -341,7 +331,7 @@ class ChunkingPreviewChunk(BaseModel):
 
 class ChunkingPreviewResponse(BaseModel):
     document_id: UUID
-    document_title: str
+    title: str
     chunking_config: dict
     chunks: list[ChunkingPreviewChunk]
 
@@ -380,38 +370,6 @@ class SearchHit(BaseModel):
 class SearchResponse(BaseModel):
     run_id: UUID
     hits: list[SearchHit]
-
-
-class GenerateNoteRequest(BaseModel):
-    query: str
-    index_version_id: UUID
-    personas: list[OutputPersona] = Field(
-        default_factory=lambda: [
-            OutputPersona.elu,
-            OutputPersona.militant,
-            OutputPersona.presse,
-        ]
-    )
-    top_k: int = Field(default_factory=_default_search_top_k)
-    rerank_top_k: int = Field(default_factory=_default_rerank_top_k)
-    filters: SearchMetadataFilters | None = None
-    preset: str | None = Field(default=None, min_length=1)
-    prompt_version: str = "note_riposte_v1"
-
-
-class OutputRead(BaseModel):
-    id: UUID
-    output_type: str
-    persona: str | None
-    title: str
-    status: str
-    content_markdown: str
-
-
-class GenerateNoteResponse(BaseModel):
-    generation_run_id: UUID
-    retrieval_run_id: UUID
-    outputs: list[OutputRead]
 
 
 def _search_filter_payload(filters: SearchMetadataFilters | None) -> dict[str, list[Any]]:
@@ -696,7 +654,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                 SELECT
                     documents.id,
                     documents.source_id,
-                    documents.title AS document_title,
+                    documents.title,
                     documents.raw_text,
                     documents.metadata AS document_metadata,
                     sources.code AS source_code
@@ -751,7 +709,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
                     source_id=document["source_id"],
                     document_id=payload.document_id,
                     chunk_id=chunk_id,
-                    title=document["document_title"],
+                    title=document["title"],
                     source_code=document["source_code"],
                     content_hash=chunk.content_sha256,
                     index_version=payload.index_version_id,
@@ -1108,7 +1066,7 @@ async def preview_document_chunking(
     chunks = chunk_text(document["raw_text"] or "", config=chunking_config)
     return ChunkingPreviewResponse(
         document_id=document_id,
-        document_title=document["title"],
+        title=document["title"],
         chunking_config=chunking_config.metadata(),
         chunks=[
             ChunkingPreviewChunk(
@@ -1573,252 +1531,6 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
             )
 
     return SearchResponse(run_id=run_id, hits=final_hits)
-
-
-@router.post("/generate-note", response_model=GenerateNoteResponse)
-async def generate_note(payload: GenerateNoteRequest) -> GenerateNoteResponse:
-    llm = get_llm_client()
-    ai_backend_preset = get_ai_backend_preset_name()
-    search_payload = {
-        "query": payload.query,
-        "index_version_id": payload.index_version_id,
-        "filters": payload.filters,
-        "preset": payload.preset,
-    }
-    if "top_k" in payload.model_fields_set:
-        search_payload["top_k"] = payload.top_k
-    if "rerank_top_k" in payload.model_fields_set:
-        search_payload["rerank_top_k"] = payload.rerank_top_k
-
-    search_response = await search_documents(
-        SearchRequest(**search_payload)
-    )
-
-    context_blocks = []
-    for hit in search_response.hits:
-        context_blocks.append(
-            f"[chunk:{hit.chunk_id} | rank:{hit.rank}]\n{hit.content}"
-        )
-
-    context = "\n\n---\n\n".join(context_blocks)
-
-    messages = [
-        LLMMessage(
-            role="system",
-            content=(
-                "Tu génères une note de riposte sourcée. "
-                "Tu ne dois utiliser que les extraits fournis."
-            ),
-        ),
-        LLMMessage(
-            role="user",
-            content=(
-                f"Question / angle : {payload.query}\n\n"
-                f"Extraits disponibles :\n\n{context}"
-            ),
-        ),
-    ]
-
-    llm_result = await llm.generate(
-        messages,
-        temperature=0.2,
-        metadata={
-            "retrieval_run_id": str(search_response.run_id),
-            "prompt_version": payload.prompt_version,
-        },
-    )
-    llm_input = {
-        "messages": [
-            {"role": message.role, "content": message.content}
-            for message in messages
-        ],
-        "temperature": 0.2,
-        "prompt_version": payload.prompt_version,
-        "retrieval_run_id": str(search_response.run_id),
-        "ai_backend_preset": ai_backend_preset,
-    }
-
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO runs (
-                    run_type,
-                    status,
-                    index_version_id,
-                    input,
-                    output,
-                    finished_at
-                )
-                VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, now())
-                RETURNING id
-                """,
-                (
-                    "generation",
-                    "succeeded",
-                    payload.index_version_id,
-                    json.dumps(
-                        {
-                            "project": project_trace_payload(),
-                            "query": payload.query,
-                            "personas": [p.value for p in payload.personas],
-                            "retrieval_run_id": str(search_response.run_id),
-                            "prompt_version": payload.prompt_version,
-                            "metadata_filters": _search_filter_payload(payload.filters),
-                            "ai_backend_preset": ai_backend_preset,
-                            "llm_provider": llm.provider,
-                            "llm_model": llm.model,
-                            "hits_used": len(search_response.hits),
-                        }
-                    ),
-                    json.dumps(
-                        {
-                            "project": project_trace_payload(),
-                            "outputs": len(payload.personas),
-                            "retrieval_run_id": str(search_response.run_id),
-                            "prompt_version": payload.prompt_version,
-                            "metadata_filters": _search_filter_payload(payload.filters),
-                            "ai_backend_preset": ai_backend_preset,
-                            "llm_provider": llm.provider,
-                            "llm_model": llm.model,
-                            "hits_used": len(search_response.hits),
-                        }
-                    ),
-                ),
-            )
-            generation_run_id = cur.fetchone()["id"]
-
-            cur.execute(
-                """
-                INSERT INTO model_calls (
-                    run_id,
-                    call_type,
-                    provider,
-                    model,
-                    prompt_version,
-                    input_hash,
-                    parameters,
-                    response_metadata
-                )
-                VALUES (%s, 'llm', %s, %s, %s, %s, %s::jsonb, %s::jsonb)
-                RETURNING id
-                """,
-                (
-                    generation_run_id,
-                    llm.provider,
-                    llm.model,
-                    payload.prompt_version,
-                    _json_trace_hash(llm_input),
-                    json.dumps(
-                        {
-                            "temperature": 0.2,
-                            "messages_count": len(messages),
-                            "context_hits": len(search_response.hits),
-                            "retrieval_run_id": str(search_response.run_id),
-                        }
-                    ),
-                    json.dumps(_adapter_response_metadata(llm, llm_result.raw or {})),
-                ),
-            )
-            llm_model_call_id = cur.fetchone()["id"]
-
-            outputs = []
-
-            for persona in payload.personas:
-                content = (
-                    f"{llm_result.text}\n\n"
-                    f"## Persona\n\n"
-                    f"Déclinaison : `{persona.value}`.\n"
-                )
-
-                cur.execute(
-                    """
-                    INSERT INTO outputs (
-                        generation_run_id,
-                        title,
-                        output_type,
-                        persona,
-                        status,
-                        content_markdown,
-                        prompt_version,
-                        llm_model_call_id,
-                        metadata
-                    )
-                    VALUES (%s, %s, %s, %s, 'draft', %s, %s, %s, %s::jsonb)
-                    RETURNING id
-                    """,
-                    (
-                        generation_run_id,
-                        f"Note de riposte — {payload.query}",
-                        "note_riposte",
-                        persona.value,
-                        content,
-                        payload.prompt_version,
-                        llm_model_call_id,
-                        json.dumps(
-                            {
-                                "retrieval_run_id": str(search_response.run_id),
-                                "index_version_id": str(payload.index_version_id),
-                                "prompt_version": payload.prompt_version,
-                                "ai_backend_preset": ai_backend_preset,
-                                "llm_provider": llm.provider,
-                                "llm_model": llm.model,
-                                "llm_model_call_id": str(llm_model_call_id),
-                            }
-                        ),
-                    ),
-                )
-                output_id = cur.fetchone()["id"]
-
-                for hit in search_response.hits:
-                    cur.execute(
-                        """
-                        SELECT id
-                        FROM retrieval_hits
-                        WHERE run_id = %s
-                          AND chunk_id = %s
-                        LIMIT 1
-                        """,
-                        (search_response.run_id, hit.chunk_id),
-                    )
-                    retrieval_hit = cur.fetchone()
-
-                    cur.execute(
-                        """
-                        INSERT INTO output_sources (
-                            output_id,
-                            chunk_id,
-                            retrieval_hit_id,
-                            claim,
-                            quote
-                        )
-                        VALUES (%s, %s, %s, %s, %s)
-                        """,
-                        (
-                            output_id,
-                            hit.chunk_id,
-                            retrieval_hit["id"] if retrieval_hit else None,
-                            payload.query,
-                            hit.content[:500],
-                        ),
-                    )
-
-                outputs.append(
-                    OutputRead(
-                        id=output_id,
-                        output_type="note_riposte",
-                        persona=persona.value,
-                        title=f"Note de riposte — {payload.query}",
-                        status="draft",
-                        content_markdown=content,
-                    )
-                )
-
-    return GenerateNoteResponse(
-        generation_run_id=generation_run_id,
-        retrieval_run_id=search_response.run_id,
-        outputs=outputs,
-    )
 
 
 @router.post("/documents/pdf", response_model=IngestionResponse)

@@ -728,9 +728,6 @@ def promote_index_version(index_version_id: UUID) -> PromoteIndexVersionResponse
                         WHERE COALESCE(metadata->>'source_code', '') = ''
                     )::int AS chunks_without_source_code,
                     COUNT(*) FILTER (
-                        WHERE COALESCE(metadata->>'role_documentaire', '') = ''
-                    )::int AS chunks_without_role_documentaire,
-                    COUNT(*) FILTER (
                         WHERE page_start IS NULL AND page_end IS NULL
                     )::int AS chunks_without_pages
                 FROM document_chunks
@@ -755,15 +752,6 @@ def promote_index_version(index_version_id: UUID) -> PromoteIndexVersionResponse
                         "error": "missing_source_code",
                         "message": "Some chunks do not have source_code metadata",
                         "count": checks["chunks_without_source_code"],
-                    },
-                )
-            if checks["chunks_without_role_documentaire"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error": "missing_role_documentaire",
-                        "message": "Some chunks do not have role_documentaire metadata",
-                        "count": checks["chunks_without_role_documentaire"],
                     },
                 )
             if checks["chunks_without_pages"]:
@@ -908,7 +896,6 @@ def list_documents(
     limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     offset: int = Query(0, ge=0),
     source_code: str | None = None,
-    role_documentaire: str | None = None,
     theme_tags: list[str] | None = Query(default=None),
     visibility_scope: str | None = None,
     access_level: str | None = None,
@@ -918,9 +905,6 @@ def list_documents(
     if source_code:
         conditions.append("sources.code = %s")
         params.append(source_code.strip().lower())
-    if role_documentaire:
-        conditions.append("documents.metadata->>'role_documentaire' = %s")
-        params.append(role_documentaire.strip().lower())
     if theme_tags:
         conditions.append("(documents.metadata->'theme_tags') ?| %s")
         params.append([tag.strip() for tag in theme_tags if tag.strip()])

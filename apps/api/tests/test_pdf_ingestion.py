@@ -743,7 +743,7 @@ def test_ingest_pdf_stores_enriched_metadata_and_extraction(monkeypatch):
             source_code=" PDF ",
             metadata_json=json.dumps(
                 {
-                    "data_tags": ["corpus", "presse"],
+                    "data_tags": ["corpus", "article"],
                     "source_url": "https://example.test/pdf",
                     "publication_date": "2026-05-01",
                     "freshness_status": "current",
@@ -754,7 +754,7 @@ def test_ingest_pdf_stores_enriched_metadata_and_extraction(monkeypatch):
     metadata = _document_insert_metadata(cursor)
 
     assert metadata["source_code"] == "pdf"
-    assert metadata["data_tags"] == ["corpus", "presse"]
+    assert metadata["data_tags"] == ["corpus", "article"]
     assert metadata["source_url"] == "https://example.test/pdf"
     assert metadata["publication_date"] == "2026-05-01"
     assert metadata["freshness_status"] == "current"
