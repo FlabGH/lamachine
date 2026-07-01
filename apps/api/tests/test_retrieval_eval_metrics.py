@@ -58,6 +58,83 @@ def test_average_returns_zero_for_empty_values():
     assert module._average([10.0, 20.0]) == 15.0
 
 
+def test_normalize_local_service_urls_prefers_local_overrides(monkeypatch):
+    module = _load_eval_module()
+
+    monkeypatch.setattr(module.Path, "exists", lambda self: False)
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://lapythie:secret@postgres:5432/lapythie",
+    )
+    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.setenv(
+        "LAPYTHIE_LOCAL_DATABASE_URL",
+        "postgresql+psycopg://lapythie:secret@127.0.0.1:55432/lapythie",
+    )
+    monkeypatch.setenv("LAPYTHIE_LOCAL_QDRANT_URL", "http://127.0.0.1:6333")
+
+    module._normalize_local_service_urls()
+
+    assert (
+        module.os.environ["DATABASE_URL"]
+        == "postgresql+psycopg://lapythie:secret@127.0.0.1:55432/lapythie"
+    )
+    assert module.os.environ["QDRANT_URL"] == "http://127.0.0.1:6333"
+
+
+def test_normalize_local_service_urls_falls_back_to_local_ports(monkeypatch):
+    module = _load_eval_module()
+
+    monkeypatch.setattr(module.Path, "exists", lambda self: False)
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://lapythie:secret@postgres:5432/lapythie",
+    )
+    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.delenv("LAPYTHIE_LOCAL_DATABASE_URL", raising=False)
+    monkeypatch.delenv("LAPYTHIE_LOCAL_QDRANT_URL", raising=False)
+
+    module._normalize_local_service_urls()
+
+    assert (
+        module.os.environ["DATABASE_URL"]
+        == "postgresql+psycopg://lapythie:secret@127.0.0.1:55432/lapythie"
+    )
+    assert module.os.environ["QDRANT_URL"] == "http://127.0.0.1:6333"
+
+
+def test_normalize_local_service_urls_keeps_docker_urls_in_container(monkeypatch):
+    module = _load_eval_module()
+
+    monkeypatch.setattr(module.Path, "exists", lambda self: str(self) == "/.dockerenv")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://lapythie:secret@postgres:5432/lapythie",
+    )
+    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.setenv(
+        "LAPYTHIE_LOCAL_DATABASE_URL",
+        "postgresql+psycopg://lapythie:secret@127.0.0.1:55432/lapythie",
+    )
+    monkeypatch.setenv("LAPYTHIE_LOCAL_QDRANT_URL", "http://127.0.0.1:6333")
+
+    module._normalize_local_service_urls()
+
+    assert (
+        module.os.environ["DATABASE_URL"]
+        == "postgresql+psycopg://lapythie:secret@postgres:5432/lapythie"
+    )
+    assert module.os.environ["QDRANT_URL"] == "http://qdrant:6333"
+
+
+def test_display_path_accepts_paths_outside_repo():
+    module = _load_eval_module()
+
+    assert module._display_path(Path("/tmp/external_manifest.yaml")) == (
+        "/tmp/external_manifest.yaml"
+    )
+
+
 def test_write_report_includes_retrieval_preset(tmp_path):
     module = _load_eval_module()
     report_path = tmp_path / "report.md"

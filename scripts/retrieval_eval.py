@@ -53,13 +53,25 @@ def _normalize_local_service_urls() -> None:
     if Path("/.dockerenv").exists():
         return
 
-    database_url = os.environ.get("DATABASE_URL", "")
-    if "@postgres:" in database_url:
-        os.environ["DATABASE_URL"] = database_url.replace("@postgres:", "@localhost:")
+    local_database_url = os.environ.get("LAPYTHIE_LOCAL_DATABASE_URL")
+    if local_database_url:
+        os.environ["DATABASE_URL"] = local_database_url
+    else:
+        database_url = os.environ.get("DATABASE_URL", "")
+        if "@postgres:5432" in database_url:
+            os.environ["DATABASE_URL"] = database_url.replace(
+                "@postgres:5432",
+                "@127.0.0.1:55432",
+            )
+
+    local_qdrant_url = os.environ.get("LAPYTHIE_LOCAL_QDRANT_URL")
+    if local_qdrant_url:
+        os.environ["QDRANT_URL"] = local_qdrant_url
+        return
 
     qdrant_url = os.environ.get("QDRANT_URL", "")
     if "://qdrant:" in qdrant_url:
-        os.environ["QDRANT_URL"] = qdrant_url.replace("://qdrant:", "://localhost:")
+        os.environ["QDRANT_URL"] = qdrant_url.replace("://qdrant:", "://127.0.0.1:")
 
 
 def _configure_imports() -> None:
@@ -260,6 +272,13 @@ def _average(values: list[float]) -> float:
 
 def _markdown_escape(value: Any) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def _loader_for_file(file_path: Path) -> tuple[str, str, str]:
@@ -658,8 +677,8 @@ def _write_report(
         "# Retrieval Evaluation",
         "",
         f"Generated at: `{datetime.now(UTC).isoformat()}`",
-        f"Manifest: `{manifest_path.relative_to(REPO_ROOT)}`",
-        f"Evaluation queries: `{queries_path.relative_to(REPO_ROOT)}`",
+        f"Manifest: `{_display_path(manifest_path)}`",
+        f"Evaluation queries: `{_display_path(queries_path)}`",
         f"Index version id: `{index_version_id}`",
         f"Vector collection: `{vector_collection}`",
         f"Retrieval preset: `{retrieval_preset or 'project_default'}`",
