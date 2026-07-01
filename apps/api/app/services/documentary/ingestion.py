@@ -11,7 +11,7 @@ from pypdf import PdfReader, PdfWriter
 from app.services.ai.clients import OcrClient, OcrResult
 
 
-STORAGE_DIR = Path("/tmp/lamachine_uploads")
+STORAGE_DIR = Path("/tmp/lapythie_uploads")
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 PDF_HEADER = b"%PDF-"
 PDF_EOF = b"%%EOF"

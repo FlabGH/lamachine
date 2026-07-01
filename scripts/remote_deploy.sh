@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Remote deployment helper for LaMachine POC.
+# Remote deployment helper for LaPythie.
 # Usage:
-#   REMOTE_HOST=151.115.151.104 REMOTE_USER=ubuntu REMOTE_DIR=/opt/lamachine/data/lamachinepoc ./scripts/remote_deploy.sh
+#   REMOTE_HOST=example.org REMOTE_USER=ubuntu REMOTE_DIR=/opt/lapythie/app ./scripts/remote_deploy.sh
 # Optionally set REMOTE_BRANCH (default current branch) and REMOTE_DOCKER_COMPOSE_FILES
 # (default "infra/compose/docker-compose.yml infra/compose/docker-compose.prod.yml").
 # Optional deployment checks:
 #   REMOTE_REBUILD_DB=1 rebuilds the remote database from versioned SQL files.
-#   REMOTE_APPLY_FIXTURE=1 loads apps/api/app/db/fixtures/phase3_step1_fixture.sql after rebuild.
+#   REMOTE_APPLY_FIXTURE=1 loads apps/api/app/db/fixtures/sample_documentary_fixture.sql after rebuild.
 #   REMOTE_RUN_AUDIT=1 runs apps/api/app/db/queries/audit_documentary_metadata.sql after deploy.
 
 REMOTE_HOST=${REMOTE_HOST:-}
@@ -95,11 +95,11 @@ if [[ "$REMOTE_REBUILD_DB" == "1" ]]; then
     db_user=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_USER < /dev/null)
     db_name=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_DB < /dev/null)
     docker compose "\${compose_args[@]}" cp apps/api/app/db/migrations/001_documentary_schema.sql postgres:/tmp/001_documentary_schema.sql
-    docker compose "\${compose_args[@]}" cp apps/api/app/db/migrations/002_documentary_metadata_contract.sql postgres:/tmp/002_documentary_metadata_contract.sql
+    docker compose "\${compose_args[@]}" cp apps/api/app/db/migrations/003_structured_objects.sql postgres:/tmp/003_structured_objects.sql
     docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d postgres -c "DROP DATABASE IF EXISTS \"\$db_name\" WITH (FORCE);" -c "CREATE DATABASE \"\$db_name\" OWNER \"\$db_user\";" < /dev/null
     docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -f /tmp/001_documentary_schema.sql < /dev/null
-    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -f /tmp/002_documentary_metadata_contract.sql < /dev/null
-    docker compose "\${compose_args[@]}" exec -T postgres rm -f /tmp/001_documentary_schema.sql /tmp/002_documentary_metadata_contract.sql < /dev/null
+    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -f /tmp/003_structured_objects.sql < /dev/null
+    docker compose "\${compose_args[@]}" exec -T postgres rm -f /tmp/001_documentary_schema.sql /tmp/003_structured_objects.sql < /dev/null
     schema_check=\$(docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -tA -F '|' -c "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sources' AND column_name = 'code'), EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sources' AND column_name = 'name'), (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE');" < /dev/null)
     if [[ "\$schema_check" != "t|f|9" ]]; then
       echo "ERROR: remote database schema assertion failed after rebuild: \$schema_check"
@@ -112,7 +112,7 @@ else
 fi
 
 if [[ "$REMOTE_APPLY_FIXTURE" == "1" ]]; then
-  echo "6) Loading remote Phase 3 fixture"
+  echo "6) Loading remote sample fixture"
   ssh -o BatchMode=yes "$REMOTE_USER@$REMOTE_HOST" bash -e <<REMOTE
     set -euo pipefail
     cd "$REMOTE_DIR"
@@ -122,9 +122,9 @@ if [[ "$REMOTE_APPLY_FIXTURE" == "1" ]]; then
     done
     db_user=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_USER < /dev/null)
     db_name=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_DB < /dev/null)
-    docker compose "\${compose_args[@]}" cp apps/api/app/db/fixtures/phase3_step1_fixture.sql postgres:/tmp/phase3_step1_fixture.sql
-    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -f /tmp/phase3_step1_fixture.sql < /dev/null
-    docker compose "\${compose_args[@]}" exec -T postgres rm -f /tmp/phase3_step1_fixture.sql < /dev/null
+    docker compose "\${compose_args[@]}" cp apps/api/app/db/fixtures/sample_documentary_fixture.sql postgres:/tmp/sample_documentary_fixture.sql
+    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -f /tmp/sample_documentary_fixture.sql < /dev/null
+    docker compose "\${compose_args[@]}" exec -T postgres rm -f /tmp/sample_documentary_fixture.sql < /dev/null
 REMOTE
 else
   echo "6) Skipping remote fixture load"

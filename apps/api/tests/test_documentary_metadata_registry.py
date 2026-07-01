@@ -98,12 +98,12 @@ def test_project_can_add_project_business_field_without_python_code():
     project = ProjectMetadataRegistry.model_validate(
         {
             "fields": {
-                "role_documentaire": _field(
+                "project_category": _field(
                     kind="project_business",
                     type="enum",
                     values_owner="project",
                     values=["reference", "opponent"],
-                    description="Project documentary role.",
+                    description="Project-defined category.",
                 )
             }
         }
@@ -111,8 +111,8 @@ def test_project_can_add_project_business_field_without_python_code():
 
     effective = merge_metadata_registries(core, project)
 
-    assert effective.fields["role_documentaire"].kind.value == "project_business"
-    assert effective.fields["role_documentaire"].values == ["reference", "opponent"]
+    assert effective.fields["project_category"].kind.value == "project_business"
+    assert effective.fields["project_category"].values == ["reference", "opponent"]
 
 
 def test_list_fields_can_be_open_to_project_values():

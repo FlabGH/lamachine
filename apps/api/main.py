@@ -3,7 +3,6 @@ import os
 import httpx
 from fastapi import FastAPI
 
-from app.api.config import router as config_router
 from app.api.consultation import router as consultation_router
 from app.api.project import router as project_router
 from app.db import get_connection
@@ -14,7 +13,6 @@ app = FastAPI(title="LaPythie API")
 app.state.project_config = get_project_config()
 app.state.metadata_registry = get_metadata_registry()
 
-app.include_router(config_router, prefix="/api")
 app.include_router(consultation_router, prefix="/api")
 app.include_router(project_router, prefix="/api")
 

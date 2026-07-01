@@ -58,14 +58,91 @@ def test_average_returns_zero_for_empty_values():
     assert module._average([10.0, 20.0]) == 15.0
 
 
+def test_normalize_local_service_urls_prefers_local_overrides(monkeypatch):
+    module = _load_eval_module()
+
+    monkeypatch.setattr(module.Path, "exists", lambda self: False)
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://lapythie:secret@postgres:5432/lapythie",
+    )
+    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.setenv(
+        "LAPYTHIE_LOCAL_DATABASE_URL",
+        "postgresql+psycopg://lapythie:secret@127.0.0.1:55432/lapythie",
+    )
+    monkeypatch.setenv("LAPYTHIE_LOCAL_QDRANT_URL", "http://127.0.0.1:6333")
+
+    module._normalize_local_service_urls()
+
+    assert (
+        module.os.environ["DATABASE_URL"]
+        == "postgresql+psycopg://lapythie:secret@127.0.0.1:55432/lapythie"
+    )
+    assert module.os.environ["QDRANT_URL"] == "http://127.0.0.1:6333"
+
+
+def test_normalize_local_service_urls_falls_back_to_local_ports(monkeypatch):
+    module = _load_eval_module()
+
+    monkeypatch.setattr(module.Path, "exists", lambda self: False)
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://lapythie:secret@postgres:5432/lapythie",
+    )
+    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.delenv("LAPYTHIE_LOCAL_DATABASE_URL", raising=False)
+    monkeypatch.delenv("LAPYTHIE_LOCAL_QDRANT_URL", raising=False)
+
+    module._normalize_local_service_urls()
+
+    assert (
+        module.os.environ["DATABASE_URL"]
+        == "postgresql+psycopg://lapythie:secret@127.0.0.1:55432/lapythie"
+    )
+    assert module.os.environ["QDRANT_URL"] == "http://127.0.0.1:6333"
+
+
+def test_normalize_local_service_urls_keeps_docker_urls_in_container(monkeypatch):
+    module = _load_eval_module()
+
+    monkeypatch.setattr(module.Path, "exists", lambda self: str(self) == "/.dockerenv")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://lapythie:secret@postgres:5432/lapythie",
+    )
+    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.setenv(
+        "LAPYTHIE_LOCAL_DATABASE_URL",
+        "postgresql+psycopg://lapythie:secret@127.0.0.1:55432/lapythie",
+    )
+    monkeypatch.setenv("LAPYTHIE_LOCAL_QDRANT_URL", "http://127.0.0.1:6333")
+
+    module._normalize_local_service_urls()
+
+    assert (
+        module.os.environ["DATABASE_URL"]
+        == "postgresql+psycopg://lapythie:secret@postgres:5432/lapythie"
+    )
+    assert module.os.environ["QDRANT_URL"] == "http://qdrant:6333"
+
+
+def test_display_path_accepts_paths_outside_repo():
+    module = _load_eval_module()
+
+    assert module._display_path(Path("/tmp/external_manifest.yaml")) == (
+        "/tmp/external_manifest.yaml"
+    )
+
+
 def test_write_report_includes_retrieval_preset(tmp_path):
     module = _load_eval_module()
     report_path = tmp_path / "report.md"
 
     module._write_report(
         report_path=report_path,
-        manifest_path=module.REPO_ROOT / "corpus" / "poc_ia" / "manifest.yaml",
-        queries_path=module.REPO_ROOT / "corpus" / "poc_ia" / "evaluation_queries.yaml",
+        manifest_path=module.REPO_ROOT / "corpus" / "sample" / "manifest.yaml",
+        queries_path=module.REPO_ROOT / "corpus" / "sample" / "evaluation_queries.yaml",
         index_version_id=UUID("00000000-0000-0000-0000-000000000001"),
         vector_collection="test_collection",
         query_reports=[
@@ -141,6 +218,7 @@ def test_ingest_document_uses_pdf_loader(monkeypatch, tmp_path):
     from app.services.documentary import ingestion, loaders
 
     executions = []
+    loader_names = []
 
     class FakeCursor:
         def __enter__(self):
@@ -219,7 +297,11 @@ def test_ingest_document_uses_pdf_loader(monkeypatch, tmp_path):
         lambda filename, content: ("/tmp/runner.pdf", "digest"),
     )
     monkeypatch.setattr(factory, "get_ocr_client", lambda: "ocr")
-    monkeypatch.setattr(loaders, "get_loader", lambda name: FakeLoader())
+    monkeypatch.setattr(
+        loaders,
+        "get_loader",
+        lambda name: loader_names.append(name) or FakeLoader(),
+    )
     monkeypatch.setattr("app.db.get_connection", lambda: FakeConnection())
 
     document_id = asyncio.run(
@@ -235,6 +317,7 @@ def test_ingest_document_uses_pdf_loader(monkeypatch, tmp_path):
     )
 
     assert document_id == UUID("00000000-0000-0000-0000-000000000002")
+    assert loader_names == ["pdf_pypdf_ocr_v1"]
     document_inserts = [
         params for query, params in executions if "INSERT INTO documents" in query
     ]
@@ -246,6 +329,124 @@ def test_ingest_document_uses_pdf_loader(monkeypatch, tmp_path):
     output_payload = json.loads(run_inserts[0][3])
     assert input_payload["loader"]["name"] == "pdf_pypdf_ocr_v1"
     assert output_payload["loader"]["name"] == "pdf_pypdf_ocr_v1"
+
+
+def test_ingest_document_uses_plain_text_loader(monkeypatch, tmp_path):
+    module = _load_eval_module()
+    module._configure_imports()
+
+    from app.services.ai import factory
+    from app.services.documentary import ingestion, loaders
+
+    executions = []
+    loader_names = []
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query, params=None):
+            executions.append((query, params))
+
+        def fetchone(self):
+            query = executions[-1][0]
+            if "INSERT INTO sources" in query:
+                return {"id": UUID("00000000-0000-0000-0000-000000000011")}
+            if "INSERT INTO documents" in query:
+                return {"id": UUID("00000000-0000-0000-0000-000000000012")}
+            return {}
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+    class FakeTrace:
+        def metadata(self):
+            return {
+                "name": "plain_text_v1",
+                "version": "1",
+                "mime_type": "text/plain",
+                "file_extension": "txt",
+                "status": "success",
+                "warnings": [],
+                "errors": [],
+                "ocr_used": False,
+                "ocr_provider": None,
+                "ocr_model": None,
+            }
+
+    class FakeLoaderResult:
+        raw_text = "Texte charge par loader texte"
+        status = "success"
+        trace = FakeTrace()
+
+        def metadata(self):
+            return {
+                "loader": self.trace.metadata(),
+                "extraction": {
+                    "method": "plain_text.normalize_text",
+                    "status": "success",
+                    "warnings": [],
+                    "errors": [],
+                    "ocr_used": False,
+                },
+            }
+
+    class FakeLoader:
+        async def load(self, input):
+            assert input.path == "/tmp/runner.txt"
+            assert input.filename == "runner.txt"
+            assert input.mime_type == "text/plain"
+            assert input.content == b"runner text"
+            assert input.ocr_client is None
+            return FakeLoaderResult()
+
+    file_path = tmp_path / "runner.txt"
+    file_path.write_bytes(b"runner text")
+
+    monkeypatch.setattr(
+        ingestion,
+        "save_uploaded_file",
+        lambda filename, content: ("/tmp/runner.txt", "digest"),
+    )
+    monkeypatch.setattr(factory, "get_ocr_client", lambda: "ocr")
+    monkeypatch.setattr(
+        loaders,
+        "get_loader",
+        lambda name: loader_names.append(name) or FakeLoader(),
+    )
+    monkeypatch.setattr("app.db.get_connection", lambda: FakeConnection())
+
+    document_id = asyncio.run(
+        module._ingest_document(
+            {
+                "file_path": file_path,
+                "metadata": {
+                    "title": "Runner text",
+                    "source_code": "runner",
+                },
+            }
+        )
+    )
+
+    assert document_id == UUID("00000000-0000-0000-0000-000000000012")
+    assert loader_names == ["plain_text_v1"]
+    source_inserts = [params for query, params in executions if "INSERT INTO sources" in query]
+    document_inserts = [
+        params for query, params in executions if "INSERT INTO documents" in query
+    ]
+    assert source_inserts[0][2] == "text"
+    assert document_inserts[0][4] == "text/plain"
+    assert document_inserts[0][-2] == "Texte charge par loader texte"
 
 
 def test_load_queries_uses_canonical_expectations_without_roles(tmp_path):

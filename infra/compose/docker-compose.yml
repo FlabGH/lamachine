@@ -11,16 +11,6 @@ services:
 #    ports:
 #      - "8000:8000"
 
-  frontend:
-    build:
-      context: ../../apps/frontend
-    env_file:
-      - ../../.env
-    depends_on:
-      - api
-#    ports:
-#      - "3000:3000"
-
   worker:
     build:
       context: ../../apps/workers

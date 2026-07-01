@@ -1,0 +1,5 @@
+LaPythie provides a generic documentary core for reusable retrieval systems.
+The metadata registry describes document and chunk fields, their allowed values,
+their propagation rules, and whether they may be used as retrieval filters.
+During ingestion, document metadata is validated against the effective registry.
+During indexing, chunk payloads are filtered before they are sent to Qdrant.

@@ -107,30 +107,6 @@ CREATE TABLE retrieval_hits (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE outputs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    generation_run_id UUID NOT NULL REFERENCES runs(id),
-    title TEXT NOT NULL,
-    output_type TEXT NOT NULL, -- note_riposte, persona_elu, persona_militant, persona_presse
-    persona TEXT,
-    status output_status NOT NULL DEFAULT 'draft',
-    content_markdown TEXT NOT NULL,
-    prompt_version TEXT NOT NULL,
-    llm_model_call_id UUID REFERENCES model_calls(id),
-    metadata JSONB NOT NULL DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE output_sources (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    output_id UUID NOT NULL REFERENCES outputs(id) ON DELETE CASCADE,
-    chunk_id UUID NOT NULL REFERENCES document_chunks(id),
-    retrieval_hit_id UUID REFERENCES retrieval_hits(id),
-    claim TEXT,
-    quote TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
 CREATE INDEX idx_documents_source_id ON documents(source_id);
 CREATE INDEX idx_chunks_document_id ON document_chunks(document_id);
 CREATE INDEX idx_chunks_index_version_id ON document_chunks(index_version_id);
@@ -139,5 +115,3 @@ CREATE INDEX idx_chunks_qdrant_point_id ON document_chunks(qdrant_point_id);
 CREATE INDEX idx_runs_type_status ON runs(run_type, status);
 CREATE INDEX idx_model_calls_run_id ON model_calls(run_id);
 CREATE INDEX idx_retrieval_hits_run_id ON retrieval_hits(run_id);
-CREATE INDEX idx_outputs_generation_run_id ON outputs(generation_run_id);
-CREATE INDEX idx_output_sources_output_id ON output_sources(output_id);

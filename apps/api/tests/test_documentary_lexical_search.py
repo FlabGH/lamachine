@@ -2,7 +2,6 @@ import asyncio
 
 from app.api.documentary import (
     LEXICAL_SEARCH_TEXT_SQL,
-    GenerateNoteRequest,
     SearchMetadataFilters,
     SearchRequest,
     _build_metadata_filter_sql,
@@ -46,12 +45,12 @@ def test_build_lexical_websearch_query_returns_none_without_significant_term():
 def test_lexical_search_text_includes_documentary_metadata_fields():
     assert "content" in LEXICAL_SEARCH_TEXT_SQL
     assert "source_code" in LEXICAL_SEARCH_TEXT_SQL
-    assert "document_title" in LEXICAL_SEARCH_TEXT_SQL
-    assert "role_documentaire" in LEXICAL_SEARCH_TEXT_SQL
+    assert "title" in LEXICAL_SEARCH_TEXT_SQL
+    assert "section_title" in LEXICAL_SEARCH_TEXT_SQL
     assert "theme_tags" in LEXICAL_SEARCH_TEXT_SQL
 
 
-def test_search_request_uses_poc_retrieval_defaults(monkeypatch):
+def test_search_request_uses_retrieval_defaults(monkeypatch):
     monkeypatch.delenv("DOCUMENTARY_SEARCH_TOP_K", raising=False)
     monkeypatch.delenv("DOCUMENTARY_RERANK_TOP_K", raising=False)
 
@@ -71,16 +70,6 @@ def test_search_request_defaults_are_configurable_from_env(monkeypatch):
 
     assert request.top_k == 12
     assert request.rerank_top_k == 7
-
-
-def test_generate_note_request_uses_same_retrieval_defaults(monkeypatch):
-    monkeypatch.setenv("DOCUMENTARY_SEARCH_TOP_K", "14")
-    monkeypatch.setenv("DOCUMENTARY_RERANK_TOP_K", "8")
-
-    request = GenerateNoteRequest(query="test", index_version_id=INDEX_VERSION_ID)
-
-    assert request.top_k == 14
-    assert request.rerank_top_k == 8
 
 
 def test_search_metadata_filters_preserve_generic_filter_payload():
