@@ -1,0 +1,10 @@
+documents:
+  - file: knowledge_base.txt
+    title: Generic knowledge base
+    source_code: sample_knowledge
+    theme_tags: [documentation, retrieval, metadata]
+
+  - file: operations_guide.txt
+    title: Operations guide
+    source_code: sample_operations
+    theme_tags: [operations, ingestion, search]

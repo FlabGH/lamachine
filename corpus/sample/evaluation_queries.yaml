@@ -1,0 +1,12 @@
+queries:
+  - id: q01_metadata_registry
+    query: "How does the metadata registry help validate documents?"
+    intent: validation
+    expected_source_codes: [sample_knowledge]
+    expected_theme_tags: [metadata, retrieval]
+
+  - id: q02_ingestion_search
+    query: "Which steps prepare documents for search?"
+    intent: pipeline
+    expected_source_codes: [sample_operations]
+    expected_theme_tags: [operations, ingestion, search]

@@ -18,11 +18,10 @@ import yaml
 
 REPO_ROOT = Path(os.getenv("LAPYTHIE_REPO_ROOT", Path(__file__).resolve().parents[1]))
 API_ROOT = Path(os.getenv("LAPYTHIE_API_ROOT", REPO_ROOT / "apps" / "api"))
-DEFAULT_MANIFEST = REPO_ROOT / "corpus" / "poc_ia" / "manifest.yaml"
-DEFAULT_FILES_DIR = REPO_ROOT / "corpus" / "poc_ia" / "files"
+DEFAULT_MANIFEST = REPO_ROOT / "corpus" / "sample" / "manifest.yaml"
+DEFAULT_FILES_DIR = REPO_ROOT / "corpus" / "sample" / "files"
 DEFAULT_QUERY_CANDIDATES = [
-    REPO_ROOT / "corpus" / "poc_ia" / "evaluation_queries.yaml",
-    REPO_ROOT / "corpus" / "evaluation_queries.yaml",
+    REPO_ROOT / "corpus" / "sample" / "evaluation_queries.yaml",
 ]
 DEFAULT_REPORT = REPO_ROOT / "artifacts" / "retrieval_eval_report.md"
 
@@ -263,6 +262,15 @@ def _markdown_escape(value: Any) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
 
 
+def _loader_for_file(file_path: Path) -> tuple[str, str, str]:
+    extension = file_path.suffix.lower()
+    if extension == ".pdf":
+        return "pdf_pypdf_ocr_v1", "application/pdf", "pdf"
+    if extension == ".txt":
+        return "plain_text_v1", "text/plain", "text"
+    raise ValueError(f"Unsupported evaluation corpus file extension: {extension or '<none>'}")
+
+
 async def _ingest_document(document: dict[str, Any]) -> UUID:
     from app.db import get_connection
     from app.services.ai.factory import get_ocr_client
@@ -279,12 +287,14 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
     content = file_path.read_bytes()
     digest = sha256_bytes(content)
     storage_path, _ = save_uploaded_file(file_path.name, content)
-    loader_result = await get_loader("pdf_pypdf_ocr_v1").load(
+    loader_name, mime_type, source_type = _loader_for_file(file_path)
+    loader_result = await get_loader(loader_name).load(
         LoaderInput(
-            mime_type="application/pdf",
+            mime_type=mime_type,
             filename=file_path.name,
             path=storage_path,
-            ocr_client=get_ocr_client(),
+            content=content,
+            ocr_client=get_ocr_client() if loader_name == "pdf_pypdf_ocr_v1" else None,
         )
     )
     source_id = uuid4()
@@ -294,7 +304,7 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
             **metadata,
             "source_id": str(source_id),
             "document_id": str(document_id),
-            "mime_type": "application/pdf",
+            "mime_type": mime_type,
             "filename": file_path.name,
         },
         scope=MetadataScope.document,
@@ -306,10 +316,15 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
             cur.execute(
                 """
                 INSERT INTO sources (id, code, source_type, origin)
-                VALUES (%s, %s, 'pdf', %s)
+                VALUES (%s, %s, %s, %s)
                 RETURNING id
                 """,
-                (source_id, metadata["source_code"], "retrieval_eval_manifest"),
+                (
+                    source_id,
+                    metadata["source_code"],
+                    source_type,
+                    "retrieval_eval_manifest",
+                ),
             )
             source_id = cur.fetchone()["id"]
 
@@ -319,7 +334,7 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
                     id, source_id, title, filename, mime_type,
                     storage_path, sha256, status, raw_text, metadata
                 )
-                VALUES (%s, %s, %s, %s, 'application/pdf', %s, %s, 'parsed', %s, %s::jsonb)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'parsed', %s, %s::jsonb)
                 RETURNING id
                 """,
                 (
@@ -327,6 +342,7 @@ async def _ingest_document(document: dict[str, Any]) -> UUID:
                     source_id,
                     metadata["title"],
                     file_path.name,
+                    mime_type,
                     storage_path,
                     digest,
                     loader_result.raw_text,
