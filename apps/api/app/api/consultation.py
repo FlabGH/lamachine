@@ -36,6 +36,7 @@ from app.services.documentary.structured_objects import (
     structured_object_collection_name,
 )
 from app.services.documentary.vector_store import get_qdrant_client, search_points
+from app.services.project_config import get_project_config
 
 
 router = APIRouter(tags=["api"])
@@ -148,6 +149,25 @@ class SearchCapabilitiesResponse(StrictModel):
     implemented_filters: list[str]
     planned_filters: list[str]
     display_only_metadata: list[str]
+
+
+class SystemSummaryCounts(StrictModel):
+    documents: int
+    sources: int
+    chunks: int
+    runs: int
+    structured_objects: int
+
+
+class SystemSummaryResponse(StrictModel):
+    counts: SystemSummaryCounts
+    project: dict[str, Any]
+    active_retrieval_preset: str
+    latest_runs: list[dict[str, Any]]
+    latest_index_versions: list[dict[str, Any]]
+    loaders: list[DocumentLoaderCatalogItem]
+    enrichers: list[DocumentaryEnricherCatalogItem]
+    retrieval_presets: list[RetrievalPresetCatalogItem]
 
 
 class IndexVersionRead(StrictModel):
@@ -619,6 +639,76 @@ def get_search_capabilities() -> SearchCapabilitiesResponse:
         implemented_filters=implemented,
         planned_filters=[],
         display_only_metadata=display_only,
+    )
+
+
+@router.get("/system/summary", response_model=SystemSummaryResponse)
+def get_system_summary() -> SystemSummaryResponse:
+    active_preset = get_retrieval_preset().name
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM documents)::int AS documents,
+                    (SELECT COUNT(*) FROM sources)::int AS sources,
+                    (SELECT COUNT(*) FROM document_chunks)::int AS chunks,
+                    (SELECT COUNT(*) FROM runs)::int AS runs,
+                    (SELECT COUNT(*) FROM structured_objects)::int AS structured_objects
+                """
+            )
+            counts = cur.fetchone()
+
+            cur.execute(
+                """
+                SELECT
+                    id AS run_id,
+                    run_type,
+                    status::text AS status,
+                    index_version_id,
+                    started_at,
+                    finished_at
+                FROM runs
+                ORDER BY started_at DESC, id DESC
+                LIMIT 5
+                """
+            )
+            latest_runs = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    embedding_provider,
+                    embedding_model,
+                    embedding_dimension,
+                    vector_collection,
+                    chunking_version,
+                    split_strategy,
+                    chunk_size,
+                    chunk_overlap,
+                    min_chunk_size,
+                    max_chunk_size,
+                    is_active,
+                    created_at
+                FROM index_versions
+                ORDER BY created_at DESC, name
+                LIMIT 5
+                """
+            )
+            latest_index_versions = cur.fetchall()
+
+    project_config = get_project_config()
+    return SystemSummaryResponse(
+        counts=SystemSummaryCounts(**counts),
+        project=project_config.model_dump(),
+        active_retrieval_preset=active_preset,
+        latest_runs=[dict(row) for row in latest_runs],
+        latest_index_versions=[dict(row) for row in latest_index_versions],
+        loaders=get_document_loader_catalog().items,
+        enrichers=get_documentary_enricher_catalog().items,
+        retrieval_presets=get_retrieval_preset_catalog().items,
     )
 
 
