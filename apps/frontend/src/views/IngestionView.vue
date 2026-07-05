@@ -1,107 +1,166 @@
 <template>
-  <div class="view-grid">
-    <div class="two-column">
-      <AppCard title="Selection des fichiers" subtitle="PDF et TXT sont supportes">
-        <div class="form-grid">
-          <div class="field">
-            <label for="files">Fichiers</label>
-            <input id="files" type="file" multiple @change="onFilesSelected" />
-          </div>
-          <div class="field">
-            <label for="origin">Origine commune</label>
-            <input id="origin" v-model="common.origin" placeholder="manifest, upload local..." />
-          </div>
-          <div class="field">
-            <label for="author">Auteur commun</label>
-            <input id="author" v-model="common.author" placeholder="Optionnel" />
-          </div>
-          <div class="field">
-            <label for="common-source-code">Source code commun</label>
-            <input
-              id="common-source-code"
-              v-model="common.sourceCode"
-              placeholder="Optionnel, sinon derive du nom du fichier"
-            />
-          </div>
-        </div>
-      </AppCard>
-
-      <AppCard title="Metadata communes" subtitle="Appliquees au lot, surchargeables fichier par fichier">
-        <LoadingState v-if="loadingSchema" />
-        <ErrorState v-else-if="schemaError" :message="schemaError" />
-        <MetadataForm v-else :schema="editableMetadataSchema" v-model="commonMetadata" context="ingestion" />
-      </AppCard>
+  <div class="view-grid ingestion-view">
+    <div class="page-heading">
+      <h2>Import de documents</h2>
     </div>
 
-    <div class="ingestion-workspace">
-      <AppCard title="Fichiers du lot">
-        <template #actions>
-          <AppButton variant="primary" :disabled="ingesting || readyFiles.length === 0" @click="runBatch">
-            {{ ingesting ? "Ingestion..." : "Lancer ingestion" }}
+    <AppCard title="Selection des fichiers" subtitle="PDF et TXT sont supportes">
+      <div class="form-grid">
+        <div class="field">
+          <label for="files">Fichiers</label>
+          <input id="files" type="file" multiple @change="onFilesSelected" />
+        </div>
+      </div>
+    </AppCard>
+
+    <AppCard title="Fichiers du lot">
+      <EmptyState v-if="files.length === 0" title="Aucun fichier selectionne" />
+      <DataTable v-else :columns="fileColumns" :rows="files">
+        <template #focus="{ row }">
+          <AppButton :variant="row.id === selectedFileId ? 'primary' : 'default'" @click="selectFile(row.id)">
+            Voir
           </AppButton>
         </template>
-        <EmptyState v-if="files.length === 0" title="Aucun fichier selectionne" />
-        <DataTable v-else :columns="fileColumns" :rows="files">
-          <template #focus="{ row }">
-            <AppButton :variant="row.id === selectedFileId ? 'primary' : 'default'" @click="selectFile(row.id)">
-              Voir
-            </AppButton>
-          </template>
-          <template #include="{ row }">
-            <input v-model="row.include" type="checkbox" :disabled="row.status === 'unsupported'" />
-          </template>
-          <template #sourceCode="{ row }">
-            <span>{{ effectiveSourceCode(row) }}</span>
-          </template>
-          <template #status="{ row }">
-            <AppBadge :variant="statusVariant(row)">
-              {{ effectiveStatus(row) }}
-            </AppBadge>
-          </template>
-          <template #message="{ row }">
-            {{ effectiveMessage(row) }}
-          </template>
-        </DataTable>
-      </AppCard>
+        <template #include="{ row }">
+          <input v-model="row.include" type="checkbox" :disabled="row.status === 'unsupported'" />
+        </template>
+        <template #sourceCode="{ row }">
+          <span>{{ effectiveSourceCode(row) }}</span>
+        </template>
+        <template #status="{ row }">
+          <AppBadge :variant="statusVariant(row)">
+            {{ effectiveStatus(row) }}
+          </AppBadge>
+        </template>
+        <template #message="{ row }">
+          {{ effectiveMessage(row) }}
+        </template>
+      </DataTable>
+    </AppCard>
 
-      <AppCard
-        title="Metadata du fichier"
-        :subtitle="selectedFile ? selectedFile.name : 'Selectionner un fichier du lot'"
-      >
-        <EmptyState v-if="!selectedFile" title="Aucun fichier selectionne" />
-        <div v-else class="view-grid">
-          <AppAlert v-if="metadataErrors(selectedFile).length" variant="error">
-            {{ metadataErrors(selectedFile).join(" ") }}
-          </AppAlert>
+    <AppCard
+      title="Metadata du fichier selectionne"
+      :subtitle="selectedFile ? selectedFile.name : 'Selectionner un fichier du lot'"
+    >
+      <LoadingState v-if="loadingSchema" />
+      <ErrorState v-else-if="schemaError" :message="schemaError" />
+      <EmptyState v-else-if="!selectedFile" title="Aucun fichier selectionne" />
+      <div v-else class="view-grid">
+        <AppAlert v-if="metadataErrors(selectedFile).length" variant="error">
+          {{ metadataErrors(selectedFile).join(" ") }}
+        </AppAlert>
 
-          <div class="form-grid">
-            <div class="field">
-              <label for="file-source-code">Source code du fichier</label>
-              <input
-                id="file-source-code"
-                v-model="selectedFile.sourceCode"
-                :placeholder="`Fallback: ${selectedFile.fallbackSourceCode}`"
-              />
-              <p class="field__description">
-                Valeur effective: {{ effectiveSourceCode(selectedFile) }}
-              </p>
-            </div>
+        <div class="tabs" role="tablist" aria-label="Metadata du fichier">
+          <button
+            v-for="tab in fileTabs"
+            :key="tab.id"
+            class="tab-button"
+            :class="{ 'is-active': activeFileTab === tab.id }"
+            type="button"
+            role="tab"
+            :aria-selected="activeFileTab === tab.id"
+            @click="activeFileTab = tab.id"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+
+        <section v-if="activeFileTab === 'source_code'" class="tab-panel" role="tabpanel">
+          <div class="field">
+            <label for="file-source-code">Source code du fichier</label>
+            <input
+              id="file-source-code"
+              v-model="selectedFile.sourceCode"
+              :placeholder="`Fallback: ${selectedFile.fallbackSourceCode}`"
+            />
+            <p class="field__description">
+              Valeur effective: {{ effectiveSourceCode(selectedFile) }}
+            </p>
           </div>
+        </section>
 
-          <MetadataForm :schema="editableMetadataSchema" v-model="selectedFile.metadata" context="ingestion" />
+        <section
+          v-else-if="metadataGroupTabs.includes(activeFileTab)"
+          class="tab-panel"
+          role="tabpanel"
+        >
+          <MetadataForm
+            :schema="editableMetadataSchema"
+            v-model="selectedFile.metadata"
+            context="ingestion"
+            :groups="[activeFileTab]"
+          />
+        </section>
 
+        <section v-else-if="activeFileTab === 'tools'" class="tab-panel" role="tabpanel">
           <div class="actions">
             <AppButton @click="copyCommonMetadataToSelected">Copier les metadata communes</AppButton>
-            <AppButton @click="resetSelectedMetadata">Reinitialiser ce fichier</AppButton>
+            <AppButton @click="copySelectedPayload">Copier le payload JSON</AppButton>
+            <AppButton @click="resetSelectedMetadata">Reinitialiser les metadata de ce fichier</AppButton>
           </div>
-
           <div class="preview-block">
             <h3 class="section-title">Payload previsualise</h3>
-            <JsonViewer :value="previewPayload(selectedFile)" />
+            <JsonViewer :value="previewPayload(selectedFile)" :show-copy="false" />
           </div>
+        </section>
+      </div>
+    </AppCard>
+
+    <AppCard title="Metadata communes" subtitle="Appliquees au lot, surchargeables fichier par fichier">
+      <LoadingState v-if="loadingSchema" />
+      <ErrorState v-else-if="schemaError" :message="schemaError" />
+      <div v-else class="view-grid">
+        <div class="tabs" role="tablist" aria-label="Metadata communes">
+          <button
+            v-for="tab in commonTabs"
+            :key="tab.id"
+            class="tab-button"
+            :class="{ 'is-active': activeCommonTab === tab.id }"
+            type="button"
+            role="tab"
+            :aria-selected="activeCommonTab === tab.id"
+            @click="activeCommonTab = tab.id"
+          >
+            {{ tab.label }}
+          </button>
         </div>
-      </AppCard>
-    </div>
+
+        <section v-if="activeCommonTab === 'general'" class="tab-panel" role="tabpanel">
+          <div class="form-grid">
+            <div class="field">
+              <label for="origin">Origine commune</label>
+              <input id="origin" v-model="common.origin" placeholder="manifest, upload local..." />
+            </div>
+            <div class="field">
+              <label for="author">Auteur commun</label>
+              <input id="author" v-model="common.author" placeholder="Optionnel" />
+            </div>
+          </div>
+        </section>
+
+        <section
+          v-else-if="metadataGroupTabs.includes(activeCommonTab)"
+          class="tab-panel"
+          role="tabpanel"
+        >
+          <MetadataForm
+            :schema="editableMetadataSchema"
+            v-model="commonMetadata"
+            context="ingestion"
+            :groups="[activeCommonTab]"
+          />
+        </section>
+      </div>
+    </AppCard>
+
+    <AppCard title="Lancer l'ingestion" subtitle="Les fichiers prets et inclus seront traites un par un.">
+      <div class="actions">
+        <AppButton variant="primary" :disabled="ingesting || readyFiles.length === 0" @click="runBatch">
+          {{ ingesting ? "Ingestion..." : "Lancer ingestion" }}
+        </AppButton>
+        <span class="muted">{{ readyFiles.length }} fichier(s) pret(s)</span>
+      </div>
+    </AppCard>
 
     <AppCard title="Suivi ingestion">
       <EmptyState v-if="results.length === 0" title="Aucune ingestion lancee" />
@@ -147,7 +206,26 @@ const loadingSchema = ref(true);
 const schemaError = ref("");
 const ingesting = ref(false);
 const commonMetadata = ref({});
-const common = reactive({ origin: "", author: "", sourceCode: "" });
+const common = reactive({ origin: "", author: "" });
+const activeFileTab = ref("source_code");
+const activeCommonTab = ref("general");
+
+const metadataGroupTabs = ["project", "description", "rights", "source"];
+const fileTabs = [
+  { id: "source_code", label: "Source code" },
+  { id: "project", label: "Projet" },
+  { id: "description", label: "Description" },
+  { id: "rights", label: "Droits et acces" },
+  { id: "source", label: "Source" },
+  { id: "tools", label: "Outils" },
+];
+const commonTabs = [
+  { id: "general", label: "General" },
+  { id: "project", label: "Projet" },
+  { id: "description", label: "Description" },
+  { id: "rights", label: "Droits et acces" },
+  { id: "source", label: "Source" },
+];
 
 const fileColumns = [
   { key: "focus", label: "Fichier" },
@@ -210,34 +288,56 @@ function slugFromFilename(name) {
   return slug || "document";
 }
 
+function fileSignature(file) {
+  return [file.name, file.size, file.lastModified].join(":");
+}
+
+function fileToBatchItem(file) {
+  const detected = detect(file);
+  return {
+    id: crypto.randomUUID(),
+    signature: fileSignature(file),
+    file,
+    name: file.name,
+    extension: file.name.split(".").pop()?.toLowerCase() || "",
+    mimeType: file.type || "non expose",
+    fallbackSourceCode: slugFromFilename(file.name),
+    sourceCode: "",
+    metadata: {},
+    include: detected.status === "ready",
+    endpoint: detected.endpoint,
+    status: detected.status,
+    message: detected.status === "ready" ? "Pret" : "Format non supporte par les loaders actuels",
+  };
+}
+
 function onFilesSelected(event) {
-  files.value = Array.from(event.target.files || []).map((file) => {
-    const detected = detect(file);
-    return {
-      id: crypto.randomUUID(),
-      file,
-      name: file.name,
-      extension: file.name.split(".").pop()?.toLowerCase() || "",
-      mimeType: file.type || "non expose",
-      fallbackSourceCode: slugFromFilename(file.name),
-      sourceCode: "",
-      metadata: {},
-      include: detected.status === "ready",
-      endpoint: detected.endpoint,
-      status: detected.status,
-      message: detected.status === "ready" ? "Pret" : "Format non supporte par les loaders actuels",
-    };
-  });
-  selectedFileId.value = files.value[0]?.id || null;
+  const existingSignatures = new Set(files.value.map((file) => file.signature));
+  const selectedItems = Array.from(event.target.files || [])
+    .filter((file) => {
+      const signature = fileSignature(file);
+      if (existingSignatures.has(signature)) return false;
+      existingSignatures.add(signature);
+      return true;
+    })
+    .map(fileToBatchItem);
+
+  event.target.value = "";
+  if (selectedItems.length === 0) return;
+
+  files.value = [...files.value, ...selectedItems];
+  selectedFileId.value = selectedItems[0].id;
+  activeFileTab.value = "source_code";
   results.value = [];
 }
 
 function selectFile(fileId) {
   selectedFileId.value = fileId;
+  activeFileTab.value = "source_code";
 }
 
 function effectiveSourceCode(item) {
-  return item.sourceCode.trim() || common.sourceCode.trim() || item.fallbackSourceCode || "document";
+  return item.sourceCode.trim() || item.fallbackSourceCode || "document";
 }
 
 function mergedUserMetadata(item) {
@@ -353,9 +453,11 @@ function resetSelectedMetadata() {
 function copyCommonMetadataToSelected() {
   if (!selectedFile.value) return;
   selectedFile.value.metadata = { ...commonMetadata.value };
-  if (common.sourceCode.trim()) {
-    selectedFile.value.sourceCode = common.sourceCode.trim();
-  }
+}
+
+async function copySelectedPayload() {
+  if (!selectedFile.value) return;
+  await navigator.clipboard.writeText(JSON.stringify(previewPayload(selectedFile.value), null, 2));
 }
 
 async function runBatch() {

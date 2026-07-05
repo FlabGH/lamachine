@@ -168,6 +168,35 @@
   margin-top: var(--space-3);
 }
 
+.tabs {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tab-button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  padding: 10px 4px;
+  white-space: nowrap;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.tab-button:hover,
+.tab-button.is-active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+.tab-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
 .field {
   display: grid;
   gap: var(--space-1);
