@@ -29,7 +29,7 @@
       <AppCard title="Metadata communes" subtitle="Appliquees au lot, surchargeables fichier par fichier">
         <LoadingState v-if="loadingSchema" />
         <ErrorState v-else-if="schemaError" :message="schemaError" />
-        <MetadataForm v-else :schema="editableMetadataSchema" v-model="commonMetadata" />
+        <MetadataForm v-else :schema="editableMetadataSchema" v-model="commonMetadata" context="ingestion" />
       </AppCard>
     </div>
 
@@ -88,7 +88,7 @@
             </div>
           </div>
 
-          <MetadataForm :schema="editableMetadataSchema" v-model="selectedFile.metadata" />
+          <MetadataForm :schema="editableMetadataSchema" v-model="selectedFile.metadata" context="ingestion" />
 
           <div class="actions">
             <AppButton @click="copyCommonMetadataToSelected">Copier les metadata communes</AppButton>

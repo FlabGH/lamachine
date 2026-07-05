@@ -21,6 +21,18 @@
     </select>
 
     <select
+      v-else-if="isListWidget && definition.values"
+      :id="fieldId"
+      multiple
+      :value="arrayValue"
+      @change="emitSelectedOptions($event.target.selectedOptions)"
+    >
+      <option v-for="value in definition.values" :key="value" :value="value">
+        {{ value }}
+      </option>
+    </select>
+
+    <select
       v-else-if="definition.type === 'boolean'"
       :id="fieldId"
       :value="modelValue === null || modelValue === undefined ? '' : String(modelValue)"
@@ -30,6 +42,15 @@
       <option value="true">true</option>
       <option value="false">false</option>
     </select>
+
+    <textarea
+      v-else-if="widget === 'textarea'"
+      :id="fieldId"
+      :value="inputValue"
+      rows="4"
+      :placeholder="placeholder"
+      @input="emitText($event.target.value)"
+    />
 
     <textarea
       v-else-if="definition.type === 'object'"
@@ -48,6 +69,10 @@
       :placeholder="placeholder"
       @input="emitText($event.target.value)"
     />
+
+    <p v-if="isListWidget" class="field__description">
+      {{ definition.values ? "Selection multiple autorisee." : "Saisir des tags separes par des virgules." }}
+    </p>
   </div>
 </template>
 
@@ -62,6 +87,11 @@ const props = defineProps({
 
 const emit = defineEmits(["update:modelValue"]);
 const fieldId = computed(() => `metadata-${props.name}`);
+const widget = computed(() => props.definition.presentation_widget || "");
+const isListWidget = computed(() =>
+  props.definition.type === "list" &&
+  ["tags", "multiselect"].includes(widget.value),
+);
 const inputType = computed(() => {
   if (props.definition.type === "date") return "date";
   if (props.definition.type === "datetime") return "datetime-local";
@@ -76,6 +106,7 @@ const inputValue = computed(() => {
   if (Array.isArray(props.modelValue)) return props.modelValue.join(", ");
   return props.modelValue ?? "";
 });
+const arrayValue = computed(() => (Array.isArray(props.modelValue) ? props.modelValue : []));
 const objectText = computed(() => {
   if (!props.modelValue) return "";
   if (typeof props.modelValue === "string") return props.modelValue;
@@ -96,6 +127,10 @@ function emitRaw(value) {
   } catch {
     emitValue(value);
   }
+}
+
+function emitSelectedOptions(options) {
+  emitValue(Array.from(options).map((option) => option.value));
 }
 
 function emitText(value) {

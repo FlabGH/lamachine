@@ -36,7 +36,7 @@
       </AppCard>
 
       <AppCard title="Filtres retrieval">
-        <MetadataForm :schema="filterSchema" v-model="filters" />
+        <MetadataForm :schema="filterSchema" v-model="filters" context="search" />
       </AppCard>
     </div>
 
@@ -93,7 +93,11 @@ const columns = [
 
 const filterSchema = computed(() => ({
   fields: Object.fromEntries(
-    Object.entries(schema.value.fields || {}).filter(([, definition]) => definition.retrieval_filterable),
+    Object.entries(schema.value.fields || {}).filter(
+      ([, definition]) =>
+        definition.retrieval_filterable &&
+        (definition.visible_in || []).includes("search"),
+    ),
   ),
 }));
 
