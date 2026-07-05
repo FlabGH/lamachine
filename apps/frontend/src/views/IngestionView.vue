@@ -288,25 +288,45 @@ function slugFromFilename(name) {
   return slug || "document";
 }
 
+function fileSignature(file) {
+  return [file.name, file.size, file.lastModified].join(":");
+}
+
+function fileToBatchItem(file) {
+  const detected = detect(file);
+  return {
+    id: crypto.randomUUID(),
+    signature: fileSignature(file),
+    file,
+    name: file.name,
+    extension: file.name.split(".").pop()?.toLowerCase() || "",
+    mimeType: file.type || "non expose",
+    fallbackSourceCode: slugFromFilename(file.name),
+    sourceCode: "",
+    metadata: {},
+    include: detected.status === "ready",
+    endpoint: detected.endpoint,
+    status: detected.status,
+    message: detected.status === "ready" ? "Pret" : "Format non supporte par les loaders actuels",
+  };
+}
+
 function onFilesSelected(event) {
-  files.value = Array.from(event.target.files || []).map((file) => {
-    const detected = detect(file);
-    return {
-      id: crypto.randomUUID(),
-      file,
-      name: file.name,
-      extension: file.name.split(".").pop()?.toLowerCase() || "",
-      mimeType: file.type || "non expose",
-      fallbackSourceCode: slugFromFilename(file.name),
-      sourceCode: "",
-      metadata: {},
-      include: detected.status === "ready",
-      endpoint: detected.endpoint,
-      status: detected.status,
-      message: detected.status === "ready" ? "Pret" : "Format non supporte par les loaders actuels",
-    };
-  });
-  selectedFileId.value = files.value[0]?.id || null;
+  const existingSignatures = new Set(files.value.map((file) => file.signature));
+  const selectedItems = Array.from(event.target.files || [])
+    .filter((file) => {
+      const signature = fileSignature(file);
+      if (existingSignatures.has(signature)) return false;
+      existingSignatures.add(signature);
+      return true;
+    })
+    .map(fileToBatchItem);
+
+  event.target.value = "";
+  if (selectedItems.length === 0) return;
+
+  files.value = [...files.value, ...selectedItems];
+  selectedFileId.value = selectedItems[0].id;
   activeFileTab.value = "source_code";
   results.value = [];
 }
