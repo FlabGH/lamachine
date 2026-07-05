@@ -10,7 +10,7 @@ LOCAL_COMPOSE = COMPOSE_DIR / "docker-compose.local.yml"
 PROD_COMPOSE = COMPOSE_DIR / "docker-compose.prod.yml"
 ROOT_COMPOSE = COMPOSE_DIR / "docker-compose.yml"
 REMOTE_DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "remote_deploy.sh"
-REQUIRED_SERVICES = {"api", "worker", "postgres", "qdrant", "caddy"}
+REQUIRED_SERVICES = {"api", "worker", "frontend", "postgres", "qdrant", "caddy"}
 
 
 def parse_service_names(compose_path: Path) -> list[str]:

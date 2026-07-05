@@ -20,6 +20,14 @@ services:
       - postgres
       - qdrant
 
+  frontend:
+    build:
+      context: ../../apps/frontend
+    env_file:
+      - ../../.env
+    depends_on:
+      - api
+
   postgres:
     image: postgres:16
     env_file:
