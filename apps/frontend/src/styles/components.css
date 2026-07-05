@@ -130,6 +130,44 @@
   gap: var(--space-3);
 }
 
+.metadata-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.metadata-group {
+  display: grid;
+  gap: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+}
+
+.metadata-group:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.metadata-group__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.metadata-details {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.metadata-details summary {
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.metadata-details .form-grid {
+  margin-top: var(--space-3);
+}
+
 .field {
   display: grid;
   gap: var(--space-1);

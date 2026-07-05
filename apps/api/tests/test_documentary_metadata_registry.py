@@ -51,6 +51,19 @@ def test_core_and_default_project_registries_load():
     assert core.fields["document_id"].project_input.value == "forbidden"
     assert core.fields["mime_type"].project_input.value == "forbidden"
     assert core.fields["chunk_id"].project_input.value == "forbidden"
+    assert core.fields["theme_tags"].presentation_group.value == "project"
+    assert core.fields["theme_tags"].presentation_importance.value == "primary"
+    assert core.fields["theme_tags"].presentation_widget.value == "tags"
+    assert [context.value for context in core.fields["theme_tags"].visible_in] == [
+        "ingestion",
+        "search",
+        "document",
+        "catalog",
+    ]
+    assert core.fields["source_code"].presentation_importance.value == "primary"
+    assert "ingestion" in [
+        context.value for context in core.fields["source_code"].visible_in
+    ]
     assert all(field.description for field in core.fields.values())
     assert project.overrides == {}
     assert project.fields == {}
@@ -81,9 +94,66 @@ def test_project_can_override_core_description_without_opening_values():
     assert effective.fields["title"].description == "Project title label."
 
 
+def test_project_can_override_core_presentation_attributes():
+    core = MetadataRegistry.model_validate({"fields": {"title": _field()}})
+    project = ProjectMetadataRegistry.model_validate(
+        {
+            "overrides": {
+                "title": {
+                    "presentation_group": "project",
+                    "presentation_order": 5,
+                    "presentation_importance": "primary",
+                    "presentation_widget": "textarea",
+                    "visible_in": ["ingestion", "document", "catalog"],
+                }
+            }
+        }
+    )
+
+    effective = merge_metadata_registries(core, project)
+    field = effective.fields["title"]
+
+    assert field.presentation_group.value == "project"
+    assert field.presentation_order == 5
+    assert field.presentation_importance.value == "primary"
+    assert field.presentation_widget.value == "textarea"
+    assert [context.value for context in field.visible_in] == [
+        "ingestion",
+        "document",
+        "catalog",
+    ]
+
+
 def test_project_override_requires_values_or_description():
-    with pytest.raises(ValidationError, match="values or description"):
+    with pytest.raises(ValidationError, match="presentation attributes"):
         ProjectMetadataRegistry.model_validate({"overrides": {"title": {}}})
+
+
+def test_registry_applies_presentation_defaults_for_existing_registries():
+    registry = MetadataRegistry.model_validate({"fields": {"title": _field()}})
+
+    field = registry.fields["title"]
+
+    assert field.presentation_group.value == "technical"
+    assert field.presentation_order == 999
+    assert field.presentation_importance.value == "secondary"
+    assert field.presentation_widget.value == "text"
+    assert [context.value for context in field.visible_in] == [
+        "ingestion",
+        "document",
+        "catalog",
+    ]
+
+
+def test_registry_rejects_duplicate_visibility_contexts():
+    with pytest.raises(ValidationError, match="visible_in"):
+        MetadataRegistry.model_validate(
+            {
+                "fields": {
+                    "title": _field(visible_in=["ingestion", "ingestion"])
+                }
+            }
+        )
 
 
 def test_registry_rejects_empty_description():

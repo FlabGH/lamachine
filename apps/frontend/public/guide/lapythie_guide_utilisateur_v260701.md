@@ -40,6 +40,25 @@ Attributs principaux :
 
 Les champs `project_input: forbidden` ne doivent pas etre fournis par le manifest ou le frontend.
 
+### Presentation des metadata
+
+Le registre peut aussi piloter l'affichage des champs dans le front :
+
+- `presentation_group` : groupe fonctionnel (`project`, `description`, `classification`, `source`, `retrieval`, `rights`, `audit`, `technical`).
+- `presentation_order` : ordre d'affichage dans le groupe.
+- `presentation_importance` : priorite UX (`primary`, `secondary`, `advanced`).
+- `presentation_widget` : widget recommande (`text`, `textarea`, `select`, `multiselect`, `tags`, `checkbox`, `number`, `date`, `datetime`, `json`).
+- `visible_in` : contextes d'affichage (`ingestion`, `search`, `document`, `chunk`, `catalog`).
+
+`description` reste le champ d'aide utilisateur. Il n'existe pas de champ `help`.
+
+Dans l'ingestion, le front affiche uniquement les metadata visibles dans `ingestion` et declarables par l'utilisateur. Les metadata communes du lot peuvent etre surchargees par les metadata propres au fichier selectionne.
+
+Pour les listes avec `presentation_widget: tags`, le front propose une saisie adaptee :
+
+- si `values` est defini, les valeurs autorisees sont proposees en selection multiple ;
+- si `values` est absent ou `null`, la saisie libre de tags est possible.
+
 ## Endpoints principaux
 
 - `GET /api/project/config`
