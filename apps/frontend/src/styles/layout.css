@@ -87,6 +87,11 @@
   gap: var(--space-4);
 }
 
+.page-heading h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
 .two-column {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);

@@ -1,7 +1,7 @@
 <template>
   <div class="view-grid">
     <div class="actions">
-      <AppButton @click="copyJson">Copier JSON</AppButton>
+      <AppButton v-if="showCopy" @click="copyJson">Copier JSON</AppButton>
     </div>
     <pre class="json-viewer">{{ formatted }}</pre>
   </div>
@@ -13,6 +13,7 @@ import AppButton from "./AppButton.vue";
 
 const props = defineProps({
   value: { type: null, required: true },
+  showCopy: { type: Boolean, default: true },
 });
 
 const formatted = computed(() => JSON.stringify(props.value, null, 2));
