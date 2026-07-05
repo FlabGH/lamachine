@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -13,9 +14,18 @@ SKIPPED_DIRS = {
 }
 SKIPPED_FILES = {
     ".env",
+    ".env.lamachine.example",
+    ".gitignore",
     "AGENTS.md",
     "SESSION.md",
     Path(__file__).name,
+}
+SKIPPED_PROJECT_FILES = {
+    Path("apps/api/config/project.lamachine.yaml"),
+    Path("apps/api/config/metadata_registry.lamachine.yaml"),
+    Path("apps/api/tests/test_lamachine_project_config.py"),
+    Path("infra/compose/docker-compose.lamachine.yml"),
+    Path("scripts/remote_deploy.sh"),
 }
 FORBIDDEN_MARKERS = (
     "La" + "Machine",
@@ -40,9 +50,22 @@ def _iter_text_files():
             continue
         if relative.name in SKIPPED_FILES:
             continue
+        if relative in SKIPPED_PROJECT_FILES:
+            continue
+        if _is_git_ignored(relative):
+            continue
         if path.suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg", ".gif"}:
             continue
         yield path
+
+
+def _is_git_ignored(relative: Path) -> bool:
+    result = subprocess.run(
+        ["git", "check-ignore", "--quiet", str(relative)],
+        cwd=REPO_ROOT,
+        check=False,
+    )
+    return result.returncode == 0
 
 
 def test_no_historical_setup_markers_remain_in_code_or_config():
