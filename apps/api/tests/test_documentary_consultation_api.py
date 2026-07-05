@@ -59,6 +59,37 @@ class FakeCursor:
             ],
         }
 
+        if "(SELECT COUNT(*) FROM documents)::int AS documents" in compact_query:
+            self._result = {
+                "documents": 3,
+                "sources": 2,
+                "chunks": 8,
+                "runs": 5,
+                "structured_objects": 1,
+            }
+            return
+
+        if "FROM index_versions" in compact_query and "LIMIT 5" in compact_query:
+            self._result = [
+                {
+                    "id": INDEX_VERSION_ID,
+                    "name": "active-test",
+                    "embedding_provider": "mistral",
+                    "embedding_model": "mistral-embed",
+                    "embedding_dimension": 1024,
+                    "vector_collection": "test_collection",
+                    "chunking_version": "generic_window_v1",
+                    "split_strategy": "generic_window_v1",
+                    "chunk_size": 450,
+                    "chunk_overlap": 80,
+                    "min_chunk_size": 80,
+                    "max_chunk_size": 650,
+                    "is_active": True,
+                    "created_at": now,
+                }
+            ]
+            return
+
         if "FROM index_versions" in compact_query and "COUNT(*) OVER()" in compact_query:
             self._result = [
                 {
@@ -236,6 +267,19 @@ class FakeCursor:
             ]
             return
 
+        if "FROM runs" in compact_query and "LIMIT 5" in compact_query:
+            self._result = [
+                {
+                    "run_id": RUN_ID,
+                    "run_type": "retrieval",
+                    "status": "succeeded",
+                    "index_version_id": INDEX_VERSION_ID,
+                    "started_at": now,
+                    "finished_at": now,
+                }
+            ]
+            return
+
         if "FROM runs" in compact_query:
             self._result = {
                 "run_id": RUN_ID,
@@ -368,6 +412,7 @@ def test_api_generic_routes_are_mounted():
     assert "/api/loaders" in paths
     assert "/api/enrichers" in paths
     assert "/api/retrieval/presets" in paths
+    assert "/api/system/summary" in paths
     assert "/api/search" in paths
     assert "/api/documents" in paths
     assert "/api/documents/{document_id}" in paths
@@ -390,6 +435,25 @@ def test_search_capabilities_distinguish_implemented_and_planned_filters():
         "theme_tags",
     ]
     assert response.filter_semantics.invalid_filters == "rejected"
+
+
+def test_system_summary_aggregates_read_only_status(monkeypatch):
+    _patch_connection(monkeypatch)
+
+    response = consultation.get_system_summary()
+
+    assert response.counts.documents == 3
+    assert response.counts.sources == 2
+    assert response.counts.chunks == 8
+    assert response.counts.runs == 5
+    assert response.counts.structured_objects == 1
+    assert response.project["project_id"] == "lapythie-core"
+    assert response.active_retrieval_preset == "hybrid_dense_lexical_rerank_v1"
+    assert response.latest_runs[0]["run_id"] == RUN_ID
+    assert response.latest_index_versions[0]["id"] == INDEX_VERSION_ID
+    assert response.loaders
+    assert response.enrichers
+    assert response.retrieval_presets
 
 
 def test_sources_catalog_is_bounded_and_sanitized(monkeypatch):

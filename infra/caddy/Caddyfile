@@ -4,7 +4,11 @@
         reverse_proxy api:8000
     }
 
+    handle /ui* {
+        reverse_proxy frontend:5173
+    }
+
     handle {
-        respond "LaPythie API" 200
+        redir /ui/ 302
     }
 }

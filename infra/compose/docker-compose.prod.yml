@@ -7,6 +7,12 @@ services:
   worker:
     restart: unless-stopped
 
+  frontend:
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: /api
+      VITE_API_PROXY_TARGET: http://api:8000
+
   postgres:
     restart: unless-stopped
 #    ports:
