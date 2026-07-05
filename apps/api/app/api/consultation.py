@@ -74,6 +74,11 @@ class MetadataSchemaItem(StrictModel):
     values_owner: str
     values: list[str] | None = None
     description: str
+    presentation_group: str
+    presentation_order: int
+    presentation_importance: str
+    presentation_widget: str
+    visible_in: list[str]
 
 
 class MetadataSchemaResponse(StrictModel):
@@ -400,6 +405,11 @@ def _entry_to_schema_item(entry: MetadataFieldDefinition) -> MetadataSchemaItem:
         values_owner=entry.values_owner.value,
         values=entry.values,
         description=entry.description,
+        presentation_group=entry.presentation_group.value,
+        presentation_order=entry.presentation_order,
+        presentation_importance=entry.presentation_importance.value,
+        presentation_widget=entry.presentation_widget.value,
+        visible_in=[context.value for context in entry.visible_in],
     )
 
 

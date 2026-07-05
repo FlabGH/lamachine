@@ -422,6 +422,16 @@ def test_api_generic_routes_are_mounted():
     assert "/api/runs/{run_id}" in paths
 
 
+def test_metadata_schema_exposes_presentation_attributes():
+    response = consultation.get_metadata_schema()
+
+    theme_tags = response.fields["theme_tags"]
+    assert theme_tags.presentation_group == "project"
+    assert theme_tags.presentation_importance == "primary"
+    assert theme_tags.presentation_widget == "tags"
+    assert theme_tags.visible_in == ["ingestion", "search", "document", "catalog"]
+
+
 def test_search_capabilities_distinguish_implemented_and_planned_filters():
     response = consultation.get_search_capabilities()
 
