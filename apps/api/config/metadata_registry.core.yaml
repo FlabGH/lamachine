@@ -2,7 +2,9 @@ fields:
   title:
     kind: core_business
     type: free
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -12,10 +14,20 @@ fields:
     values_owner: none
     values: null
     description: Human-readable document title.
+    presentation_group: description
+    presentation_order: 10
+    presentation_importance: primary
+    presentation_widget: text
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   source_code:
     kind: core_business
     type: free
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: true
     project_input: required
     propagate_to_chunks: true
@@ -25,10 +37,21 @@ fields:
     values_owner: none
     values: null
     description: Short stable identifier for the source.
+    presentation_group: source
+    presentation_order: 10
+    presentation_importance: primary
+    presentation_widget: text
+    visible_in:
+    - ingestion
+    - search
+    - document
+    - catalog
   source_id:
     kind: core_business
     type: free
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: forbidden
     propagate_to_chunks: true
@@ -38,10 +61,19 @@ fields:
     values_owner: none
     values: null
     description: Technical identifier of the registered source.
+    presentation_group: source
+    presentation_order: 900
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - document
+    - catalog
   source_url:
     kind: core_business
     type: free
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -51,10 +83,19 @@ fields:
     values_owner: none
     values: null
     description: Original document address when known.
+    presentation_group: source
+    presentation_order: 20
+    presentation_importance: secondary
+    presentation_widget: text
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   author:
     kind: core_business
     type: free
-    scopes: [document]
+    scopes:
+    - document
     required: false
     project_input: optional
     propagate_to_chunks: false
@@ -64,10 +105,20 @@ fields:
     values_owner: none
     values: null
     description: Document author or authoring organization.
+    presentation_group: description
+    presentation_order: 30
+    presentation_importance: secondary
+    presentation_widget: text
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   publication_date:
     kind: core_business
     type: date
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -77,10 +128,20 @@ fields:
     values_owner: none
     values: null
     description: Date when the document was published.
+    presentation_group: description
+    presentation_order: 40
+    presentation_importance: secondary
+    presentation_widget: date
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   collected_at:
     kind: core_business
     type: datetime
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -90,10 +151,19 @@ fields:
     values_owner: none
     values: null
     description: Date when the document was collected or imported.
+    presentation_group: description
+    presentation_order: 80
+    presentation_importance: advanced
+    presentation_widget: datetime
+    visible_in:
+    - document
+    - catalog
   language:
     kind: core_business
     type: enum
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -101,12 +171,27 @@ fields:
     qdrant_required: false
     retrieval_filterable: true
     values_owner: core
-    values: [fr, en, multi, unknown]
+    values:
+    - fr
+    - en
+    - multi
+    - unknown
     description: Primary language of the document.
+    presentation_group: description
+    presentation_order: 50
+    presentation_importance: secondary
+    presentation_widget: select
+    visible_in:
+    - ingestion
+    - search
+    - document
+    - catalog
   is_primary_source:
     kind: core_business
     type: boolean
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -116,10 +201,20 @@ fields:
     values_owner: none
     values: null
     description: Whether the document comes from its primary source.
+    presentation_group: source
+    presentation_order: 60
+    presentation_importance: secondary
+    presentation_widget: checkbox
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   citation_policy:
     kind: core_business
     type: enum
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -127,12 +222,26 @@ fields:
     qdrant_required: false
     retrieval_filterable: false
     values_owner: core
-    values: [citable, non_citable, internal_only, to_verify]
+    values:
+    - citable
+    - non_citable
+    - internal_only
+    - to_verify
     description: Functional rule for citing the document.
+    presentation_group: rights
+    presentation_order: 10
+    presentation_importance: secondary
+    presentation_widget: select
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   rights_status:
     kind: core_business
     type: enum
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -140,12 +249,26 @@ fields:
     qdrant_required: false
     retrieval_filterable: false
     values_owner: core
-    values: [open, copyrighted, internal, unknown]
+    values:
+    - open
+    - copyrighted
+    - internal
+    - unknown
     description: Known usage rights status for the document.
+    presentation_group: rights
+    presentation_order: 20
+    presentation_importance: secondary
+    presentation_widget: select
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   freshness_status:
     kind: core_business
     type: enum
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -153,12 +276,25 @@ fields:
     qdrant_required: false
     retrieval_filterable: false
     values_owner: core
-    values: [current, stale, archived, unknown]
+    values:
+    - current
+    - stale
+    - archived
+    - unknown
     description: Freshness state of the documentary information.
+    presentation_group: audit
+    presentation_order: 40
+    presentation_importance: advanced
+    presentation_widget: select
+    visible_in:
+    - document
+    - catalog
   metadata_status:
     kind: core_business
     type: enum
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -166,12 +302,25 @@ fields:
     qdrant_required: false
     retrieval_filterable: false
     values_owner: core
-    values: [draft, ai_proposed, human_validated, rejected]
+    values:
+    - draft
+    - ai_proposed
+    - human_validated
+    - rejected
     description: Preparation or validation state of the metadata.
+    presentation_group: audit
+    presentation_order: 10
+    presentation_importance: advanced
+    presentation_widget: select
+    visible_in:
+    - document
+    - catalog
   qualification_mode:
     kind: core_business
     type: enum
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -179,12 +328,24 @@ fields:
     qdrant_required: false
     retrieval_filterable: false
     values_owner: core
-    values: [manual, ai, import]
+    values:
+    - manual
+    - ai
+    - import
     description: Method used to qualify the metadata.
+    presentation_group: audit
+    presentation_order: 20
+    presentation_importance: advanced
+    presentation_widget: select
+    visible_in:
+    - document
+    - catalog
   qualification_confidence:
     kind: core_business
     type: number
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -194,10 +355,19 @@ fields:
     values_owner: none
     values: null
     description: Confidence level associated with the qualification.
+    presentation_group: audit
+    presentation_order: 30
+    presentation_importance: advanced
+    presentation_widget: number
+    visible_in:
+    - document
+    - catalog
   qualification_rationale:
     kind: core_business
     type: free
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -207,10 +377,19 @@ fields:
     values_owner: none
     values: null
     description: Concise justification for the qualification.
+    presentation_group: audit
+    presentation_order: 50
+    presentation_importance: advanced
+    presentation_widget: textarea
+    visible_in:
+    - document
+    - catalog
   validated_by:
     kind: core_business
     type: free
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -220,10 +399,19 @@ fields:
     values_owner: none
     values: null
     description: Functional identity of the validator.
+    presentation_group: audit
+    presentation_order: 60
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - document
+    - catalog
   validated_at:
     kind: core_business
     type: datetime
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -233,10 +421,19 @@ fields:
     values_owner: none
     values: null
     description: Date and time when metadata was validated.
+    presentation_group: audit
+    presentation_order: 70
+    presentation_importance: advanced
+    presentation_widget: datetime
+    visible_in:
+    - document
+    - catalog
   document_type:
     kind: project_business
     type: enum
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -246,10 +443,20 @@ fields:
     values_owner: project
     values: null
     description: Functional category defined by the project.
+    presentation_group: project
+    presentation_order: 10
+    presentation_importance: primary
+    presentation_widget: select
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   theme_tags:
     kind: project_business
     type: list
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -259,10 +466,21 @@ fields:
     values_owner: project
     values: null
     description: Project-defined thematic labels.
+    presentation_group: project
+    presentation_order: 20
+    presentation_importance: primary
+    presentation_widget: tags
+    visible_in:
+    - ingestion
+    - search
+    - document
+    - catalog
   data_tags:
     kind: project_business
     type: list
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -272,10 +490,21 @@ fields:
     values_owner: project
     values: null
     description: Data labels used to discover the corpus.
+    presentation_group: project
+    presentation_order: 30
+    presentation_importance: secondary
+    presentation_widget: tags
+    visible_in:
+    - ingestion
+    - search
+    - document
+    - catalog
   geographic_scope:
     kind: project_business
     type: free
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -285,10 +514,20 @@ fields:
     values_owner: none
     values: null
     description: Geographic scope defined by the project.
+    presentation_group: project
+    presentation_order: 40
+    presentation_importance: secondary
+    presentation_widget: text
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   temporal_scope:
     kind: project_business
     type: free
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -298,10 +537,20 @@ fields:
     values_owner: none
     values: null
     description: Temporal scope defined by the project.
+    presentation_group: project
+    presentation_order: 50
+    presentation_importance: secondary
+    presentation_widget: text
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   visibility_scope:
     kind: access_control
     type: enum
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -309,12 +558,27 @@ fields:
     qdrant_required: false
     retrieval_filterable: true
     values_owner: core
-    values: [public, internal, restricted, organization]
+    values:
+    - public
+    - internal
+    - restricted
+    - organization
     description: Functional visibility scope of the document.
+    presentation_group: rights
+    presentation_order: 30
+    presentation_importance: secondary
+    presentation_widget: select
+    visible_in:
+    - ingestion
+    - search
+    - document
+    - catalog
   organization_id:
     kind: access_control
     type: free
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -324,10 +588,21 @@ fields:
     values_owner: none
     values: null
     description: Identifier of the organization linked to the document.
+    presentation_group: rights
+    presentation_order: 40
+    presentation_importance: secondary
+    presentation_widget: text
+    visible_in:
+    - ingestion
+    - search
+    - document
+    - catalog
   access_level:
     kind: access_control
     type: enum
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: false
     project_input: optional
     propagate_to_chunks: true
@@ -335,12 +610,27 @@ fields:
     qdrant_required: false
     retrieval_filterable: true
     values_owner: core
-    values: [open, authenticated, restricted, admin]
+    values:
+    - open
+    - authenticated
+    - restricted
+    - admin
     description: Functional access level associated with the document.
+    presentation_group: rights
+    presentation_order: 50
+    presentation_importance: secondary
+    presentation_widget: select
+    visible_in:
+    - ingestion
+    - search
+    - document
+    - catalog
   document_id:
     kind: technical
     type: free
-    scopes: [document, chunk]
+    scopes:
+    - document
+    - chunk
     required: true
     project_input: forbidden
     propagate_to_chunks: true
@@ -350,10 +640,19 @@ fields:
     values_owner: none
     values: null
     description: Technical identifier of the document.
+    presentation_group: technical
+    presentation_order: 10
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - document
+    - catalog
   chunk_id:
     kind: technical
     type: free
-    scopes: [chunk, retrieval_hit]
+    scopes:
+    - chunk
+    - retrieval_hit
     required: true
     project_input: forbidden
     propagate_to_chunks: false
@@ -363,10 +662,18 @@ fields:
     values_owner: none
     values: null
     description: Technical identifier of the chunk.
+    presentation_group: technical
+    presentation_order: 20
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - chunk
+    - catalog
   chunk_index:
     kind: technical
     type: integer
-    scopes: [chunk]
+    scopes:
+    - chunk
     required: true
     project_input: forbidden
     propagate_to_chunks: false
@@ -376,10 +683,18 @@ fields:
     values_owner: none
     values: null
     description: Position of the chunk within the document.
+    presentation_group: technical
+    presentation_order: 30
+    presentation_importance: advanced
+    presentation_widget: number
+    visible_in:
+    - chunk
+    - catalog
   parent_document_id:
     kind: technical
     type: free
-    scopes: [chunk]
+    scopes:
+    - chunk
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -389,10 +704,18 @@ fields:
     values_owner: none
     values: null
     description: Identifier of the parent document of the chunk.
+    presentation_group: technical
+    presentation_order: 40
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - chunk
+    - catalog
   filename:
     kind: technical
     type: free
-    scopes: [document]
+    scopes:
+    - document
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -402,10 +725,18 @@ fields:
     values_owner: none
     values: null
     description: Name of the imported file.
+    presentation_group: source
+    presentation_order: 70
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - document
+    - catalog
   mime_type:
     kind: technical
     type: free
-    scopes: [document]
+    scopes:
+    - document
     required: true
     project_input: forbidden
     propagate_to_chunks: false
@@ -415,10 +746,18 @@ fields:
     values_owner: none
     values: null
     description: MIME type of the document.
+    presentation_group: source
+    presentation_order: 80
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - document
+    - catalog
   content_hash:
     kind: technical
     type: free
-    scopes: [chunk]
+    scopes:
+    - chunk
     required: true
     project_input: forbidden
     propagate_to_chunks: false
@@ -428,10 +767,18 @@ fields:
     values_owner: none
     values: null
     description: Content fingerprint of the chunk.
+    presentation_group: technical
+    presentation_order: 50
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - chunk
+    - catalog
   document_version:
     kind: technical
     type: free
-    scopes: [document]
+    scopes:
+    - document
     required: false
     project_input: optional
     propagate_to_chunks: false
@@ -441,10 +788,20 @@ fields:
     values_owner: none
     values: null
     description: Functional version of the document when available.
+    presentation_group: description
+    presentation_order: 70
+    presentation_importance: secondary
+    presentation_widget: text
+    visible_in:
+    - ingestion
+    - document
+    - catalog
   ingestion_version:
     kind: technical
     type: free
-    scopes: [document, run]
+    scopes:
+    - document
+    - run
     required: false
     project_input: optional
     propagate_to_chunks: false
@@ -454,10 +811,19 @@ fields:
     values_owner: none
     values: null
     description: Version of the ingestion process used.
+    presentation_group: audit
+    presentation_order: 80
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - document
+    - catalog
   chunking_version:
     kind: technical
     type: free
-    scopes: [chunk, run]
+    scopes:
+    - chunk
+    - run
     required: true
     project_input: forbidden
     propagate_to_chunks: false
@@ -467,10 +833,20 @@ fields:
     values_owner: none
     values: null
     description: Version of the chunking mechanism used.
+    presentation_group: technical
+    presentation_order: 60
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - chunk
+    - catalog
   index_version:
     kind: technical
     type: free
-    scopes: [chunk, run, retrieval_hit]
+    scopes:
+    - chunk
+    - run
+    - retrieval_hit
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -480,10 +856,18 @@ fields:
     values_owner: none
     values: null
     description: Functional version of the index used.
+    presentation_group: audit
+    presentation_order: 90
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - catalog
   vector_collection:
     kind: technical
     type: free
-    scopes: [chunk, run]
+    scopes:
+    - chunk
+    - run
     required: true
     project_input: forbidden
     propagate_to_chunks: false
@@ -493,10 +877,20 @@ fields:
     values_owner: none
     values: null
     description: Vector collection associated with the chunk or run.
+    presentation_group: technical
+    presentation_order: 70
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - chunk
+    - catalog
   embedding_provider:
     kind: technical
     type: free
-    scopes: [chunk, run, model_call]
+    scopes:
+    - chunk
+    - run
+    - model_call
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -506,10 +900,20 @@ fields:
     values_owner: none
     values: null
     description: Provider used to compute embeddings.
+    presentation_group: technical
+    presentation_order: 80
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - chunk
+    - catalog
   embedding_model:
     kind: technical
     type: free
-    scopes: [chunk, run, model_call]
+    scopes:
+    - chunk
+    - run
+    - model_call
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -519,10 +923,20 @@ fields:
     values_owner: none
     values: null
     description: Embedding model used.
+    presentation_group: technical
+    presentation_order: 90
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - chunk
+    - catalog
   embedding_dimension:
     kind: technical
     type: integer
-    scopes: [chunk, run, model_call]
+    scopes:
+    - chunk
+    - run
+    - model_call
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -532,10 +946,19 @@ fields:
     values_owner: none
     values: null
     description: Dimension of embedding vectors.
+    presentation_group: technical
+    presentation_order: 100
+    presentation_importance: advanced
+    presentation_widget: number
+    visible_in:
+    - chunk
+    - catalog
   chunking_strategy:
     kind: technical
     type: free
-    scopes: [chunk, run]
+    scopes:
+    - chunk
+    - run
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -545,10 +968,19 @@ fields:
     values_owner: none
     values: null
     description: Selected chunking strategy.
+    presentation_group: technical
+    presentation_order: 110
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - chunk
+    - catalog
   chunk_size:
     kind: technical
     type: integer
-    scopes: [chunk, run]
+    scopes:
+    - chunk
+    - run
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -558,10 +990,19 @@ fields:
     values_owner: none
     values: null
     description: Target size of chunks.
+    presentation_group: technical
+    presentation_order: 120
+    presentation_importance: advanced
+    presentation_widget: number
+    visible_in:
+    - chunk
+    - catalog
   chunk_overlap:
     kind: technical
     type: integer
-    scopes: [chunk, run]
+    scopes:
+    - chunk
+    - run
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -571,10 +1012,18 @@ fields:
     values_owner: none
     values: null
     description: Configured overlap between chunks.
+    presentation_group: technical
+    presentation_order: 130
+    presentation_importance: advanced
+    presentation_widget: number
+    visible_in:
+    - chunk
+    - catalog
   token_count:
     kind: technical
     type: integer
-    scopes: [chunk]
+    scopes:
+    - chunk
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -584,10 +1033,18 @@ fields:
     values_owner: none
     values: null
     description: Estimated number of tokens in the chunk.
+    presentation_group: technical
+    presentation_order: 140
+    presentation_importance: advanced
+    presentation_widget: number
+    visible_in:
+    - chunk
+    - catalog
   qdrant_point_id:
     kind: technical
     type: free
-    scopes: [chunk]
+    scopes:
+    - chunk
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -597,10 +1054,18 @@ fields:
     values_owner: none
     values: null
     description: Vector point identifier associated with the chunk.
+    presentation_group: technical
+    presentation_order: 150
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - chunk
+    - catalog
   page_start:
     kind: technical
     type: integer
-    scopes: [chunk]
+    scopes:
+    - chunk
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -610,10 +1075,18 @@ fields:
     values_owner: none
     values: null
     description: First page covered by the chunk.
+    presentation_group: technical
+    presentation_order: 160
+    presentation_importance: advanced
+    presentation_widget: number
+    visible_in:
+    - chunk
+    - catalog
   page_end:
     kind: technical
     type: integer
-    scopes: [chunk]
+    scopes:
+    - chunk
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -623,10 +1096,18 @@ fields:
     values_owner: none
     values: null
     description: Last page covered by the chunk.
+    presentation_group: technical
+    presentation_order: 170
+    presentation_importance: advanced
+    presentation_widget: number
+    visible_in:
+    - chunk
+    - catalog
   section_title:
     kind: technical
     type: free
-    scopes: [chunk]
+    scopes:
+    - chunk
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -636,10 +1117,18 @@ fields:
     values_owner: none
     values: null
     description: Section title associated with the chunk.
+    presentation_group: technical
+    presentation_order: 180
+    presentation_importance: advanced
+    presentation_widget: text
+    visible_in:
+    - chunk
+    - catalog
   heading_path:
     kind: technical
     type: list
-    scopes: [chunk]
+    scopes:
+    - chunk
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -649,10 +1138,18 @@ fields:
     values_owner: none
     values: null
     description: Hierarchical path of section headings.
+    presentation_group: technical
+    presentation_order: 190
+    presentation_importance: advanced
+    presentation_widget: tags
+    visible_in:
+    - chunk
+    - catalog
   section_level:
     kind: technical
     type: integer
-    scopes: [chunk]
+    scopes:
+    - chunk
     required: false
     project_input: forbidden
     propagate_to_chunks: false
@@ -662,3 +1159,10 @@ fields:
     values_owner: none
     values: null
     description: Hierarchical level of the section.
+    presentation_group: technical
+    presentation_order: 200
+    presentation_importance: advanced
+    presentation_widget: number
+    visible_in:
+    - chunk
+    - catalog
