@@ -130,11 +130,19 @@ def test_remote_deploy_defaults_to_prod_compose_override():
     assert 'docker compose "\\${compose_args[@]}" up -d --build' in script
 
 
-def test_compose_files_do_not_define_project_name():
+def test_root_compose_defines_project_name_from_environment():
     root_compose = ROOT_COMPOSE.read_text(encoding="utf-8").lstrip()
-    local_compose = LOCAL_COMPOSE.read_text(encoding="utf-8").lstrip()
-    prod_compose = PROD_COMPOSE.read_text(encoding="utf-8").lstrip()
 
-    assert not root_compose.startswith("name:")
-    assert not local_compose.startswith("name:")
-    assert not prod_compose.startswith("name:")
+    assert root_compose.startswith("name: ${COMPOSE_PROJECT_NAME:-lapythie}")
+
+
+def test_local_compose_ports_are_environment_configurable():
+    local_compose = LOCAL_COMPOSE.read_text(encoding="utf-8")
+    root_compose = ROOT_COMPOSE.read_text(encoding="utf-8")
+
+    assert "${API_HOST_PORT:-8000}:8000" in local_compose
+    assert "${FRONTEND_HOST_PORT:-5173}:5173" in local_compose
+    assert "${POSTGRES_HOST_PORT:-55432}:5432" in local_compose
+    assert "${QDRANT_HOST_PORT:-6333}:6333" in local_compose
+    assert "${CADDY_HTTP_PORT:-80}:80" in root_compose
+    assert "${CADDY_HTTPS_PORT:-443}:443" in root_compose
