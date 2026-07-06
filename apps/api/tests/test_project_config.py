@@ -104,3 +104,19 @@ def test_project_config_path_relative_to_api_root(monkeypatch):
     assert project_config.get_project_config() == load_project_config(
         Path(project_config.API_ROOT) / "config" / "project.yaml"
     )
+
+
+def test_consumer_project_config_example_uses_local_project_registry():
+    config = load_project_config(
+        Path(project_config.API_ROOT) / "config" / "project.consumer.example.yaml"
+    )
+
+    assert config.project_id == "consumer-project"
+    assert (
+        config.documentary.metadata_registry.core
+        == "config/metadata_registry.core.yaml"
+    )
+    assert (
+        config.documentary.metadata_registry.project
+        == "config/local/metadata_registry.project.yaml"
+    )

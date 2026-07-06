@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+apps/api/config/local/
 *.pem
 *.key
 id_*
