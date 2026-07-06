@@ -130,6 +130,15 @@ def test_remote_deploy_defaults_to_prod_compose_override():
     assert 'docker compose "\\${compose_args[@]}" up -d --build' in script
 
 
+def test_remote_rebuild_uses_consolidated_schema_file():
+    script = REMOTE_DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    assert "apps/api/app/db/migrations/000_current_schema.sql" in script
+    assert "/tmp/000_current_schema.sql" in script
+    assert "apps/api/app/db/migrations/001_documentary_schema.sql" not in script
+    assert "apps/api/app/db/migrations/003_structured_objects.sql" not in script
+
+
 def test_root_compose_defines_project_name_from_environment():
     root_compose = ROOT_COMPOSE.read_text(encoding="utf-8").lstrip()
 

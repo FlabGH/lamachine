@@ -94,12 +94,10 @@ if [[ "$REMOTE_REBUILD_DB" == "1" ]]; then
     done
     db_user=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_USER < /dev/null)
     db_name=\$(docker compose "\${compose_args[@]}" exec -T postgres printenv POSTGRES_DB < /dev/null)
-    docker compose "\${compose_args[@]}" cp apps/api/app/db/migrations/001_documentary_schema.sql postgres:/tmp/001_documentary_schema.sql
-    docker compose "\${compose_args[@]}" cp apps/api/app/db/migrations/003_structured_objects.sql postgres:/tmp/003_structured_objects.sql
+    docker compose "\${compose_args[@]}" cp apps/api/app/db/migrations/000_current_schema.sql postgres:/tmp/000_current_schema.sql
     docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d postgres -c "DROP DATABASE IF EXISTS \"\$db_name\" WITH (FORCE);" -c "CREATE DATABASE \"\$db_name\" OWNER \"\$db_user\";" < /dev/null
-    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -f /tmp/001_documentary_schema.sql < /dev/null
-    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -f /tmp/003_structured_objects.sql < /dev/null
-    docker compose "\${compose_args[@]}" exec -T postgres rm -f /tmp/001_documentary_schema.sql /tmp/003_structured_objects.sql < /dev/null
+    docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -f /tmp/000_current_schema.sql < /dev/null
+    docker compose "\${compose_args[@]}" exec -T postgres rm -f /tmp/000_current_schema.sql < /dev/null
     schema_check=\$(docker compose "\${compose_args[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U "\$db_user" -d "\$db_name" -tA -F '|' -c "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sources' AND column_name = 'code'), EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sources' AND column_name = 'name'), (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE');" < /dev/null)
     if [[ "\$schema_check" != "t|f|9" ]]; then
       echo "ERROR: remote database schema assertion failed after rebuild: \$schema_check"
