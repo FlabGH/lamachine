@@ -1,5 +1,5 @@
-COMPOSE_LOCAL=docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.local.yml
-COMPOSE_PROD=docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.prod.yml
+COMPOSE_LOCAL=docker compose --env-file .env -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.local.yml
+COMPOSE_PROD=docker compose --env-file .env -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.prod.yml
 
 up:
 	$(COMPOSE_LOCAL) up -d --build
