@@ -7,7 +7,7 @@ LaPythie est un core documentaire IA generique. Le setup local expose une API Fa
 Demarrer la stack :
 
 ```bash
-docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.local.yml up -d --build
+docker compose --env-file .env -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.local.yml up -d --build
 ```
 
 La stack Docker utilise `COMPOSE_PROJECT_NAME=lapythie` par defaut. Cette

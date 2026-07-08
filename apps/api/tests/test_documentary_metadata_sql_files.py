@@ -3,6 +3,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DB_DIR = REPO_ROOT / "apps" / "api" / "app" / "db"
+CURRENT_SCHEMA = DB_DIR / "migrations" / "000_current_schema.sql"
 INITIAL_SCHEMA = DB_DIR / "migrations" / "001_documentary_schema.sql"
 STRUCTURED_OBJECTS_MIGRATION = DB_DIR / "migrations" / "003_structured_objects.sql"
 FIXTURE = DB_DIR / "fixtures" / "sample_documentary_fixture.sql"
@@ -11,6 +12,7 @@ DESTRUCTIVE_SQL = ("DROP ", "TRUNCATE ", "DELETE ")
 
 
 def test_documentary_metadata_sql_files_exist():
+    assert CURRENT_SCHEMA.is_file()
     assert INITIAL_SCHEMA.is_file()
     assert STRUCTURED_OBJECTS_MIGRATION.is_file()
     assert FIXTURE.is_file()
@@ -27,6 +29,18 @@ def test_initial_schema_uses_canonical_core_tables():
     assert "CREATE TABLE outputs" not in sql
     assert "CREATE TABLE output_sources" not in sql
     assert "name TEXT NOT NULL" not in sql.split("CREATE TABLE documents", 1)[0]
+
+
+def test_current_schema_consolidates_reset_schema():
+    sql = CURRENT_SCHEMA.read_text(encoding="utf-8").upper()
+
+    assert "CREATE TABLE SOURCES" in sql
+    assert "CREATE TABLE DOCUMENTS" in sql
+    assert "CREATE TABLE DOCUMENT_CHUNKS" in sql
+    assert "CREATE TABLE STRUCTURED_OBJECTS" in sql
+    assert "CREATE TABLE STRUCTURED_OBJECT_CHUNKS" in sql
+    assert "IDX_STRUCTURED_OBJECTS_DOCUMENT_ID" in sql
+    assert "IDX_STRUCTURED_OBJECT_CHUNKS_CHUNK_ID" in sql
 
 
 def test_structured_objects_migration_adds_separate_storage():
