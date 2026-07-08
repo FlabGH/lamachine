@@ -222,6 +222,17 @@
   padding: 9px 10px;
 }
 
+.checkbox-field {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.checkbox-field input {
+  width: auto;
+}
+
 .json-viewer {
   background: #0f172a;
   color: #e2e8f0;
