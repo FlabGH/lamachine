@@ -1,0 +1,12 @@
+project_id: lapythie-core
+project_name: LaPythie
+config_version: 1
+
+documentary:
+  metadata_registry:
+    core: config/metadata_registry.core.yaml
+    project: config/metadata_registry.project.yaml
+  chunking_strategy: index_version_runtime
+  retrieval_presets: config/retrieval_presets.yaml
+  retrieval_preset: hybrid_dense_lexical_rerank_v1
+  enrichers: []

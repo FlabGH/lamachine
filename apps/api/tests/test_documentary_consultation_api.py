@@ -422,6 +422,38 @@ def test_api_generic_routes_are_mounted():
     assert "/api/runs/{run_id}" in paths
 
 
+def test_document_command_routes_are_mounted_before_document_id_route():
+    routes = [
+        (route.path, set(getattr(route, "methods", set())))
+        for route in app.routes
+    ]
+    paths = [path for path, _methods in routes]
+
+    assert ("/api/documents/pdf", {"POST"}) in routes
+    assert ("/api/documents/text", {"POST"}) in routes
+    assert ("/api/index", {"POST"}) in routes
+    assert (
+        "/api/documents/{document_id}/chunking/preview",
+        {"POST"},
+    ) in routes
+    assert paths.index("/api/documents/pdf") < paths.index(
+        "/api/documents/{document_id}"
+    )
+    assert paths.index("/api/documents/text") < paths.index(
+        "/api/documents/{document_id}"
+    )
+
+
+def test_obsolete_documentary_router_routes_are_not_mounted():
+    post_routes = {
+        route.path
+        for route in app.routes
+        if "POST" in getattr(route, "methods", set())
+    }
+
+    assert "/api/sources" not in post_routes
+
+
 def test_metadata_schema_exposes_presentation_attributes():
     response = consultation.get_metadata_schema()
 
