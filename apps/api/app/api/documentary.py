@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import UploadFile, File, Form, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from qdrant_client.models import FieldCondition, Filter, MatchAny
 
@@ -70,8 +70,6 @@ from app.services.ai.clients import RerankCandidate
 from app.services.documentary.vector_store import search_chunks
 
 from app.services.project_config import get_project_config, project_trace_payload
-
-router = APIRouter(tags=["documentary"])
 
 
 DENSE_WEIGHT = 0.6
@@ -480,7 +478,6 @@ def _build_metadata_filter_sql(
     return " AND " + " AND ".join(clauses), params
 
 
-@router.post("/sources", response_model=SourceRead, deprecated=True)
 async def create_source(payload: SourceCreate) -> SourceRead:
     raise NotImplementedError
 
@@ -642,7 +639,6 @@ def _chunking_config_for_preview(
 
 
 
-@router.post("/index", response_model=RunRead)
 async def index_document(payload: IndexRequest) -> RunRead:
     embedding_client = get_embedding_client()
     ai_backend_preset = get_ai_backend_preset_name()
@@ -1024,10 +1020,6 @@ async def index_document(payload: IndexRequest) -> RunRead:
     )
 
 
-@router.post(
-    "/documents/{document_id}/chunking/preview",
-    response_model=ChunkingPreviewResponse,
-)
 async def preview_document_chunking(
     document_id: UUID,
     payload: ChunkingPreviewRequest,
@@ -1084,7 +1076,6 @@ async def preview_document_chunking(
     )
 
 
-@router.post("/search", response_model=SearchResponse)
 async def search_documents(payload: SearchRequest) -> SearchResponse:
     search_plan = _resolve_retrieval_plan_or_422(payload)
     search_filters = search_plan.filters
@@ -1533,7 +1524,6 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
     return SearchResponse(run_id=run_id, hits=final_hits)
 
 
-@router.post("/documents/pdf", response_model=IngestionResponse)
 async def ingest_pdf(
     file: UploadFile = File(...),
     source_code: str = Form(...),
@@ -1661,7 +1651,6 @@ async def ingest_pdf(
     )
 
 
-@router.get("/documents/{document_id}/extraction", response_model=DocumentExtractionRead)
 async def get_document_extraction(document_id: UUID) -> DocumentExtractionRead:
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -1701,7 +1690,6 @@ async def get_document_extraction(document_id: UUID) -> DocumentExtractionRead:
     )
 
 
-@router.post("/documents/text", response_model=IngestionResponse)
 async def ingest_text(
     title: str = Form(...),
     text: str = Form(...),
