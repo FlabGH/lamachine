@@ -1,0 +1,152 @@
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+}
+
+.sidebar {
+  background: #111827;
+  color: #f9fafb;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.sidebar__brand {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.sidebar__brand-title {
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.sidebar__brand-subtitle {
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.sidebar__nav {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.sidebar__item {
+  border: 0;
+  width: 100%;
+  text-align: left;
+  color: #e5e7eb;
+  background: transparent;
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.sidebar__item:hover,
+.sidebar__item.is-active {
+  background: #243044;
+  color: #ffffff;
+}
+
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  min-height: 72px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-4) var(--space-6);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.header__title {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.header__subtitle {
+  color: var(--color-text-muted);
+}
+
+.content {
+  padding: var(--space-6);
+  display: grid;
+  gap: var(--space-5);
+}
+
+.view-grid {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.page-heading h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.two-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.ingestion-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.85fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.preview-block {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+@media (max-width: 920px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: var(--space-3);
+  }
+
+  .sidebar__nav {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .sidebar__item {
+    white-space: nowrap;
+  }
+
+  .two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .ingestion-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .content {
+    padding: var(--space-4);
+  }
+}

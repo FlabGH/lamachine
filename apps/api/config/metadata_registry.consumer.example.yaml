@@ -1,0 +1,35 @@
+overrides:
+  document_type:
+    values:
+      - report
+      - note
+      - article
+    description: Type of document used by this consumer project.
+
+fields:
+  project_domain:
+    kind: project_business
+    type: enum
+    scopes:
+      - document
+      - chunk
+    required: true
+    project_input: required
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: true
+    retrieval_filterable: true
+    values_owner: project
+    values:
+      - example_domain
+      - other_domain
+    description: Domain assigned by the consumer project.
+    presentation_group: project
+    presentation_order: 100
+    presentation_importance: primary
+    presentation_widget: select
+    visible_in:
+      - ingestion
+      - search
+      - document
+      - catalog

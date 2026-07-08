@@ -1,0 +1,5 @@
+The documentary pipeline loads a source document, validates project-provided
+metadata, chunks the extracted text, enriches document or chunk metadata when
+configured, embeds chunk content, and stores searchable payloads in Qdrant.
+Search combines dense retrieval, lexical retrieval, optional filters, and
+reranking according to the selected retrieval preset.

@@ -1,0 +1,1808 @@
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+from enum import Enum
+from typing import Any
+from uuid import UUID, uuid4
+
+import psycopg
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
+from qdrant_client.models import FieldCondition, Filter, MatchAny
+
+import json
+
+from app.db import get_connection
+from app.services.documentary.enrichers import (
+    ChunkEnrichmentContext,
+    DocumentEnrichmentContext,
+    EnrichmentStage,
+    run_chunk_enrichers,
+    run_document_enrichers,
+)
+from app.services.documentary.ingestion import (
+    save_uploaded_file,
+    sha256_bytes,
+)
+from app.services.documentary.loaders import LoaderInput, get_loader
+
+from app.services.documentary.chunking import (
+    ChunkingConfig,
+    chunk_text,
+    deduplicate_chunks,
+)
+from app.services.documentary.metadata_contract import (
+    build_canonical_chunk_metadata,
+)
+from app.services.documentary.metadata_registry import (
+    MetadataScope,
+    get_metadata_registry,
+)
+from app.services.documentary.metadata_validation import (
+    MetadataValidationError,
+    build_qdrant_payload,
+    propagate_document_metadata,
+    validate_project_input_metadata,
+    validate_metadata,
+    validate_retrieval_filters,
+)
+from app.services.documentary.retrieval_presets import (
+    RerankingStrategy,
+    RetrievalPlan,
+    resolve_retrieval_plan,
+)
+
+from app.services.ai.factory import (
+    get_embedding_client,
+    get_ocr_client,
+    get_reranker_client,
+)
+from app.services.ai.presets import get_ai_backend_preset_name
+from app.services.documentary.vector_store import (
+    ensure_collection,
+    get_qdrant_client,
+    upsert_chunks,
+)
+
+from app.services.ai.clients import RerankCandidate
+from app.services.documentary.vector_store import search_chunks
+
+from app.services.project_config import get_project_config, project_trace_payload
+
+router = APIRouter(tags=["documentary"])
+
+
+DENSE_WEIGHT = 0.6
+LEXICAL_WEIGHT = 0.4
+DEFAULT_SEARCH_TOP_K_ENV = "DOCUMENTARY_SEARCH_TOP_K"
+DEFAULT_RERANK_TOP_K_ENV = "DOCUMENTARY_RERANK_TOP_K"
+DEFAULT_SEARCH_TOP_K = 30
+DEFAULT_RERANK_TOP_K = 20
+LEXICAL_SEARCH_CONFIG = "french"
+LEXICAL_MAX_QUERY_TERMS = 12
+LEXICAL_MIN_TERM_LENGTH = 3
+LEXICAL_STOPWORDS = {
+    "avec",
+    "aux",
+    "dans",
+    "des",
+    "donc",
+    "elle",
+    "elles",
+    "est",
+    "etre",
+    "être",
+    "fait",
+    "faut",
+    "ils",
+    "les",
+    "leur",
+    "leurs",
+    "mais",
+    "par",
+    "pas",
+    "peut",
+    "pour",
+    "que",
+    "quel",
+    "quelle",
+    "quels",
+    "quelles",
+    "quoi",
+    "sont",
+    "sur",
+    "une",
+    "vers",
+}
+LEXICAL_SEARCH_TEXT_SQL = """
+concat_ws(
+    ' ',
+    content,
+    replace(COALESCE(metadata->>'source_code', ''), '_', ' '),
+    replace(COALESCE(metadata->>'title', ''), '_', ' '),
+    replace(COALESCE(metadata->>'section_title', ''), '_', ' '),
+    replace(COALESCE(metadata->>'theme_tags', ''), '_', ' ')
+)
+"""
+
+
+def _configured_enrichers():
+    return get_project_config().documentary.enrichers
+
+
+def _run_pre_chunking_enrichers(
+    *,
+    document_id: UUID,
+    source_id: UUID,
+    source_code: str,
+    title: str,
+    raw_text: str,
+    metadata: dict,
+) -> tuple[dict, list[dict]]:
+    return run_document_enrichers(
+        DocumentEnrichmentContext(
+            document_id=str(document_id),
+            source_id=str(source_id),
+            source_code=source_code,
+            title=title,
+            raw_text=raw_text,
+            metadata=metadata,
+        ),
+        configs=_configured_enrichers(),
+        stage=EnrichmentStage.pre_chunking,
+    )
+
+
+def _run_post_chunking_enrichers(
+    *,
+    document_id: UUID,
+    chunk_id: UUID,
+    chunk_index: int,
+    content: str,
+    metadata: dict,
+) -> tuple[dict, list[dict]]:
+    return run_chunk_enrichers(
+        ChunkEnrichmentContext(
+            document_id=str(document_id),
+            chunk_id=str(chunk_id),
+            chunk_index=chunk_index,
+            content=content,
+            metadata=metadata,
+        ),
+        configs=_configured_enrichers(),
+        stage=EnrichmentStage.post_chunking,
+    )
+
+
+def _significant_lexical_terms(query: str) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw_term in re.findall(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ_]+", query.lower()):
+        term = raw_term.strip("_'-")
+        if len(term) < LEXICAL_MIN_TERM_LENGTH:
+            continue
+        if term in LEXICAL_STOPWORDS:
+            continue
+        if term in seen:
+            continue
+        seen.add(term)
+        terms.append(term)
+        if len(terms) >= LEXICAL_MAX_QUERY_TERMS:
+            break
+    return terms
+
+
+def _build_lexical_websearch_query(query: str) -> str | None:
+    terms = _significant_lexical_terms(query)
+    if not terms:
+        return None
+    return " OR ".join(terms)
+
+
+def _json_trace_hash(payload: dict | list) -> str:
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _default_search_top_k() -> int:
+    return _env_int(DEFAULT_SEARCH_TOP_K_ENV, DEFAULT_SEARCH_TOP_K)
+
+
+def _default_rerank_top_k() -> int:
+    return _env_int(DEFAULT_RERANK_TOP_K_ENV, DEFAULT_RERANK_TOP_K)
+
+
+def _adapter_response_metadata(client, raw: dict | None = None) -> dict:
+    metadata = {"adapter": client.__class__.__name__}
+    if raw:
+        metadata.update(raw)
+    return metadata
+
+
+class RunStatus(str, Enum):
+    pending = "pending"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+
+
+class SourceCreate(BaseModel):
+    code: str
+    source_type: str = Field(examples=["pdf", "text"])
+    origin: str | None = None
+    author: str | None = None
+
+
+class SourceRead(SourceCreate):
+    id: UUID
+
+
+class DocumentRead(BaseModel):
+    id: UUID
+    source_id: UUID
+    title: str
+    mime_type: str
+    status: str
+
+
+class IngestionResponse(BaseModel):
+    run_id: UUID
+    source_id: UUID
+    document_id: UUID
+    status: RunStatus
+
+
+class ExtractedPageRead(BaseModel):
+    page: int
+    text: str
+    char_count: int
+    section_title: str | None = None
+    extraction_source: str = "pypdf"
+    layout_quality: dict = Field(default_factory=dict)
+
+
+class ExtractionReportRead(BaseModel):
+    method: str | None = None
+    status: str | None = None
+    ocr_used: bool = False
+    ocr_provider: str | None = None
+    ocr_model: str | None = None
+    ocr_trigger_reason: str | None = None
+    ocr_pages_processed: int = 0
+    page_count: int | None = None
+    pages_with_text: int | None = None
+    empty_pages: list[int] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    layout_quality_rules_version: str | None = None
+    layout_quality_status: str | None = None
+    layout_suspect_pages: list[int] = Field(default_factory=list)
+    layout_ocr_pages_requested: list[int] = Field(default_factory=list)
+    layout_ocr_pages_replaced: list[int] = Field(default_factory=list)
+    layout_ocr_pages_kept_original: list[int] = Field(default_factory=list)
+    layout_warnings: list[str] = Field(default_factory=list)
+
+
+class DocumentExtractionRead(BaseModel):
+    document_id: UUID
+    title: str
+    extraction: ExtractionReportRead
+    pages: list[ExtractedPageRead]
+
+
+class IndexRequest(BaseModel):
+    document_id: UUID
+    index_version_id: UUID
+
+
+class ChunkingPreviewRequest(BaseModel):
+    index_version_id: UUID | None = None
+    chunk_size: int | None = None
+    chunk_overlap: int | None = None
+    split_strategy: str | None = None
+    min_chunk_size: int | None = None
+    max_chunk_size: int | None = None
+    chunking_version: str | None = None
+
+
+class ChunkingPreviewChunk(BaseModel):
+    chunk_index: int
+    content: str
+    content_hash: str
+    page_start: int | None = None
+    page_end: int | None = None
+    section_title: str | None = None
+    token_count: int
+    metadata: dict = Field(default_factory=dict)
+
+
+class ChunkingPreviewResponse(BaseModel):
+    document_id: UUID
+    title: str
+    chunking_config: dict
+    chunks: list[ChunkingPreviewChunk]
+
+
+class RunRead(BaseModel):
+    id: UUID
+    run_type: str
+    status: RunStatus
+
+
+class SearchMetadataFilters(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    def active_filters(self) -> dict[str, list[Any]]:
+        return dict(self.model_extra or {})
+
+
+class SearchRequest(BaseModel):
+    query: str
+    index_version_id: UUID
+    top_k: int = Field(default_factory=_default_search_top_k)
+    rerank_top_k: int = Field(default_factory=_default_rerank_top_k)
+    filters: SearchMetadataFilters | None = None
+    preset: str | None = Field(default=None, min_length=1)
+
+
+class SearchHit(BaseModel):
+    chunk_id: UUID
+    document_id: UUID
+    rank: int
+    score: float | None = None
+    content: str
+    metadata: dict = Field(default_factory=dict)
+
+
+class SearchResponse(BaseModel):
+    run_id: UUID
+    hits: list[SearchHit]
+
+
+def _search_filter_payload(filters: SearchMetadataFilters | None) -> dict[str, list[Any]]:
+    if filters is None:
+        return {}
+    return filters.active_filters()
+
+
+def _validate_search_filters_or_422(
+    filters: SearchMetadataFilters | None,
+) -> dict[str, list[Any]]:
+    try:
+        return validate_retrieval_filters(
+            _search_filter_payload(filters),
+            registry=get_metadata_registry(),
+        )
+    except MetadataValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_metadata_filters",
+                "issues": [
+                    {
+                        "code": issue.code,
+                        "field": issue.field,
+                        "message": issue.message,
+                    }
+                    for issue in exc.issues
+                ],
+            },
+        ) from exc
+
+
+def _resolve_retrieval_plan_or_422(payload: SearchRequest) -> RetrievalPlan:
+    try:
+        return resolve_retrieval_plan(
+            requested_preset=payload.preset,
+            request_fields=set(payload.model_fields_set),
+            request_top_k=payload.top_k,
+            request_rerank_top_k=payload.rerank_top_k,
+            request_filters=_search_filter_payload(payload.filters),
+        )
+    except MetadataValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_retrieval_preset_or_filters",
+                "issues": [
+                    {
+                        "code": issue.code,
+                        "field": issue.field,
+                        "message": issue.message,
+                    }
+                    for issue in exc.issues
+                ],
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_retrieval_preset",
+                "message": str(exc),
+            },
+        ) from exc
+
+
+def _build_qdrant_search_filter(
+    filters: dict[str, list[Any]],
+) -> Filter | None:
+    if not filters:
+        return None
+
+    return Filter(
+        must=[
+            FieldCondition(
+                key=field,
+                match=MatchAny(any=values),
+            )
+            for field, values in filters.items()
+        ],
+    )
+
+
+def _build_metadata_filter_sql(
+    filters: dict[str, list[Any]],
+    *,
+    metadata_expression: str = "metadata",
+    registry,
+) -> tuple[str, list[Any]]:
+    if not filters:
+        return "", []
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    for field, values in filters.items():
+        field_definition = registry.fields[field]
+        if field_definition.type.value == "list":
+            clauses.append(f"({metadata_expression}->%s) ?| %s")
+            params.extend([field, values])
+        else:
+            value_clauses = [
+                f"{metadata_expression} @> %s::jsonb" for _ in values
+            ]
+            clauses.append("(" + " OR ".join(value_clauses) + ")")
+            params.extend(json.dumps({field: value}) for value in values)
+
+    return " AND " + " AND ".join(clauses), params
+
+
+@router.post("/sources", response_model=SourceRead, deprecated=True)
+async def create_source(payload: SourceCreate) -> SourceRead:
+    raise NotImplementedError
+
+
+def _parse_ingestion_metadata_json(metadata_json: str | None) -> dict:
+    if metadata_json is None or not isinstance(metadata_json, str):
+        return {}
+    if not metadata_json.strip():
+        return {}
+    try:
+        parsed = json.loads(metadata_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata_json",
+                "message": str(exc),
+            },
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata_json",
+                "message": "metadata_json must be a JSON object",
+            },
+        )
+    return parsed
+
+
+def _normalize_ingestion_metadata_or_400(
+    metadata_json: str | None,
+    *,
+    title: str,
+    source_code: str,
+    mime_type: str,
+    filename: str | None,
+    author: str | None,
+    source_id: UUID,
+    document_id: UUID,
+) -> dict:
+    parsed = _parse_ingestion_metadata_json(metadata_json)
+    controlled_fields = {
+        "title",
+        "source_code",
+        "mime_type",
+        "filename",
+        "author",
+        "source_id",
+        "document_id",
+    }
+    conflicts = sorted(controlled_fields.intersection(parsed))
+    if conflicts:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata",
+                "message": (
+                    "metadata_json must not override server-controlled fields: "
+                    f"{', '.join(conflicts)}"
+                ),
+            },
+        )
+
+    project_input = {
+        **parsed,
+        "source_code": source_code.strip().lower(),
+    }
+    if title.strip():
+        project_input["title"] = title.strip()
+    if isinstance(author, str) and author.strip():
+        project_input["author"] = author.strip()
+
+    try:
+        validate_project_input_metadata(
+            project_input,
+            registry=get_metadata_registry(),
+        )
+    except MetadataValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata",
+                "message": str(exc),
+            },
+        ) from exc
+
+    metadata = {
+        **parsed,
+        "title": title.strip(),
+        "source_code": source_code.strip().lower(),
+        "mime_type": mime_type.strip(),
+        "source_id": str(source_id),
+        "document_id": str(document_id),
+    }
+    if isinstance(filename, str):
+        metadata["filename"] = filename.strip()
+    if isinstance(author, str):
+        metadata["author"] = author.strip()
+
+    try:
+        return validate_metadata(
+            metadata,
+            scope=MetadataScope.document,
+            registry=get_metadata_registry(),
+        )
+    except MetadataValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata",
+                "message": str(exc),
+            },
+        ) from exc
+
+
+def _validate_document_metadata_or_400(metadata: dict) -> dict:
+    try:
+        return validate_metadata(
+            metadata,
+            scope=MetadataScope.document,
+            registry=get_metadata_registry(),
+        )
+    except MetadataValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_metadata",
+                "message": str(exc),
+            },
+        ) from exc
+
+
+def _chunking_config_from_index_version(index_version: dict) -> ChunkingConfig:
+    return ChunkingConfig.from_index_version(index_version)
+
+
+def _chunking_config_for_preview(
+    payload: ChunkingPreviewRequest,
+    index_version: dict | None,
+) -> ChunkingConfig:
+    base = (
+        _chunking_config_from_index_version(index_version)
+        if index_version
+        else ChunkingConfig()
+    )
+    return ChunkingConfig(
+        chunk_size=payload.chunk_size or base.chunk_size,
+        chunk_overlap=(
+            payload.chunk_overlap
+            if payload.chunk_overlap is not None
+            else base.chunk_overlap
+        ),
+        split_strategy=payload.split_strategy or base.split_strategy,
+        min_chunk_size=payload.min_chunk_size or base.min_chunk_size,
+        max_chunk_size=payload.max_chunk_size or base.max_chunk_size,
+        chunking_version=payload.chunking_version or base.chunking_version,
+    )
+
+
+
+@router.post("/index", response_model=RunRead)
+async def index_document(payload: IndexRequest) -> RunRead:
+    embedding_client = get_embedding_client()
+    ai_backend_preset = get_ai_backend_preset_name()
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    documents.id,
+                    documents.source_id,
+                    documents.title,
+                    documents.raw_text,
+                    documents.metadata AS document_metadata,
+                    sources.code AS source_code
+                FROM documents
+                JOIN sources ON sources.id = documents.source_id
+                WHERE documents.id = %s
+                """,
+                (payload.document_id,),
+            )
+            document = cur.fetchone()
+
+            if document is None:
+                raise ValueError(f"Document not found: {payload.document_id}")
+
+            cur.execute(
+                """
+                SELECT *
+                FROM index_versions
+                WHERE id = %s
+                """,
+                (payload.index_version_id,),
+            )
+            index_version = cur.fetchone()
+
+            if index_version is None:
+                raise ValueError(f"Index version not found: {payload.index_version_id}")
+
+            if index_version["embedding_dimension"] != embedding_client.dimension:
+                raise ValueError(
+                    "Embedding dimension mismatch: "
+                    f"index_version={index_version['embedding_dimension']} "
+                    f"client={embedding_client.dimension}"
+                )
+
+            raw_text = document["raw_text"] or ""
+            chunking_config = _chunking_config_from_index_version(index_version)
+            registry = get_metadata_registry()
+            validate_metadata(
+                document["document_metadata"] or {},
+                scope=MetadataScope.document,
+                registry=registry,
+            )
+            candidate_chunks = chunk_text(raw_text, config=chunking_config)
+            chunks = deduplicate_chunks(candidate_chunks)
+            chunks_skipped_duplicate = len(candidate_chunks) - len(chunks)
+
+            prepared_chunks = []
+            enrichment_traces: list[dict] = []
+            for chunk in chunks:
+                chunk_id = uuid4()
+                chunk_metadata = build_canonical_chunk_metadata(
+                    source_id=document["source_id"],
+                    document_id=payload.document_id,
+                    chunk_id=chunk_id,
+                    title=document["title"],
+                    source_code=document["source_code"],
+                    content_hash=chunk.content_sha256,
+                    index_version=payload.index_version_id,
+                    vector_collection=index_version["vector_collection"],
+                    chunk_index=chunk.chunk_index,
+                    token_count=chunk.token_count,
+                    chunking_version=chunking_config.chunking_version,
+                    chunking_strategy=chunking_config.split_strategy,
+                    chunk_size=chunking_config.chunk_size,
+                    chunk_overlap=chunking_config.chunk_overlap,
+                    page_start=chunk.page_start,
+                    page_end=chunk.page_end,
+                    extra={
+                        "embedding_provider": embedding_client.provider,
+                        "embedding_model": embedding_client.model,
+                        "embedding_dimension": embedding_client.dimension,
+                    },
+                )
+                chunk_metadata = {
+                    **chunk_metadata,
+                    **chunk.metadata,
+                }
+                chunk_metadata = propagate_document_metadata(
+                    document["document_metadata"] or {},
+                    chunk_metadata,
+                    registry=registry,
+                )
+                chunk_metadata, chunk_enrichment_traces = _run_post_chunking_enrichers(
+                    document_id=payload.document_id,
+                    chunk_id=chunk_id,
+                    chunk_index=chunk.chunk_index,
+                    content=chunk.content,
+                    metadata=chunk_metadata,
+                )
+                enrichment_traces.extend(chunk_enrichment_traces)
+                validate_metadata(
+                    chunk_metadata,
+                    scope=MetadataScope.chunk,
+                    registry=registry,
+                )
+                qdrant_payload = build_qdrant_payload(
+                    chunk_metadata,
+                    registry=registry,
+                )
+                prepared_chunks.append(
+                    (chunk_id, chunk, chunk_metadata, qdrant_payload)
+                )
+
+            cur.execute(
+                """
+                DELETE FROM document_chunks
+                WHERE document_id = %s
+                  AND index_version_id = %s
+                """,
+                (payload.document_id, payload.index_version_id),
+            )
+
+            cur.execute(
+                """
+                INSERT INTO runs (run_type, status, index_version_id, input, output)
+                VALUES (%s, %s, %s, %s::jsonb, %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    "indexing",
+                    "running",
+                    payload.index_version_id,
+                    json.dumps(
+                        {
+                            "project": project_trace_payload(),
+                            "document_id": str(payload.document_id),
+                            "index_version_id": str(payload.index_version_id),
+                            "ai_backend_preset": ai_backend_preset,
+                            "vector_collection": index_version["vector_collection"],
+                            "embedding_provider": embedding_client.provider,
+                            "embedding_model": embedding_client.model,
+                            "embedding_dimension": embedding_client.dimension,
+                            "chunking": chunking_config.metadata(),
+                            "enrichers": enrichment_traces,
+                        }
+                    ),
+                    json.dumps({}),
+                ),
+            )
+            run_id = cur.fetchone()["id"]
+
+            embedding_input = {
+                "document_id": str(payload.document_id),
+                "index_version_id": str(payload.index_version_id),
+                "candidate_chunk_count": len(candidate_chunks),
+                "unique_chunk_count": len(chunks),
+                "content_hashes": [chunk.content_sha256 for chunk in chunks],
+            }
+
+            cur.execute(
+                """
+                INSERT INTO model_calls (
+                    run_id,
+                    call_type,
+                    provider,
+                    model,
+                    input_hash,
+                    parameters,
+                    response_metadata
+                )
+                VALUES (%s, 'embedding', %s, %s, %s, %s::jsonb, %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    run_id,
+                    embedding_client.provider,
+                    embedding_client.model,
+                    _json_trace_hash(embedding_input),
+                    json.dumps(
+                        {
+                            "dimension": embedding_client.dimension,
+                            "texts_count": len(chunks),
+                            "candidate_texts_count": len(candidate_chunks),
+                            "skipped_duplicate_texts_count": chunks_skipped_duplicate,
+                            "index_version_id": str(payload.index_version_id),
+                            "vector_collection": index_version["vector_collection"],
+                            "chunking": chunking_config.metadata(),
+                        }
+                    ),
+                    json.dumps(_adapter_response_metadata(embedding_client)),
+                ),
+            )
+            model_call_id = cur.fetchone()["id"]
+
+            inserted_chunks = []
+
+            for chunk_id, chunk, chunk_metadata, qdrant_payload in prepared_chunks:
+                cur.execute(
+                    """
+                    INSERT INTO document_chunks (
+                        id, document_id,
+                        index_version_id,
+                        chunk_index,
+                        content,
+                        content_sha256,
+                        page_start,
+                        page_end,
+                        token_count,
+                        metadata
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    ON CONFLICT (index_version_id, content_sha256) DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        chunk_id,
+                        payload.document_id,
+                        payload.index_version_id,
+                        chunk.chunk_index,
+                        chunk.content,
+                        chunk.content_sha256,
+                        chunk.page_start,
+                        chunk.page_end,
+                        chunk.token_count,
+                        json.dumps(chunk_metadata),
+                    ),
+                )
+                inserted = cur.fetchone()
+                if inserted is None:
+                    chunks_skipped_duplicate += 1
+                    continue
+                inserted_chunks.append((chunk_id, chunk, chunk_metadata, qdrant_payload))
+
+            embedding_result = None
+            if inserted_chunks:
+                embedding_result = await embedding_client.embed_texts(
+                    [chunk.content for _, chunk, _, _ in inserted_chunks],
+                    metadata={
+                        "index_version_id": str(payload.index_version_id),
+                        "document_id": str(payload.document_id),
+                    },
+                )
+
+            cur.execute(
+                """
+                UPDATE model_calls
+                SET response_metadata = %s::jsonb,
+                    parameters = %s::jsonb
+                WHERE id = %s
+                """,
+                (
+                    json.dumps(
+                        _adapter_response_metadata(
+                            embedding_client,
+                            {
+                                **(
+                                    (embedding_result.raw or {})
+                                    if embedding_result
+                                    else {}
+                                ),
+                                "dimension": (
+                                    embedding_result.dimension
+                                    if embedding_result
+                                    else embedding_client.dimension
+                                ),
+                                "vectors_count": (
+                                    len(embedding_result.vectors)
+                                    if embedding_result
+                                    else 0
+                                ),
+                            },
+                        )
+                    ),
+                    json.dumps(
+                        {
+                            "dimension": (
+                                embedding_result.dimension
+                                if embedding_result
+                                else embedding_client.dimension
+                            ),
+                            "texts_count": len(inserted_chunks),
+                            "candidate_texts_count": len(candidate_chunks),
+                            "skipped_duplicate_texts_count": chunks_skipped_duplicate,
+                            "index_version_id": str(payload.index_version_id),
+                            "vector_collection": index_version["vector_collection"],
+                            "chunking": chunking_config.metadata(),
+                        }
+                    ),
+                    model_call_id,
+                ),
+            )
+
+            if embedding_result:
+                qdrant = get_qdrant_client()
+                ensure_collection(
+                    qdrant,
+                    collection_name=index_version["vector_collection"],
+                    vector_size=embedding_result.dimension,
+                )
+
+                points = []
+                for (chunk_id, _chunk, _chunk_metadata, qdrant_payload), vector in zip(
+                    inserted_chunks,
+                    embedding_result.vectors,
+                ):
+                    points.append(
+                        (
+                            chunk_id,
+                            vector,
+                            qdrant_payload,
+                        )
+                    )
+
+                upsert_chunks(
+                    qdrant,
+                    collection_name=index_version["vector_collection"],
+                    points=points,
+                )
+                for chunk_id, _chunk, _chunk_metadata, _qdrant_payload in inserted_chunks:
+                    cur.execute(
+                        """
+                        UPDATE document_chunks
+                        SET qdrant_point_id = %s
+                        WHERE id = %s
+                        """,
+                        (chunk_id, chunk_id),
+                    )
+
+            cur.execute(
+                """
+                UPDATE documents
+                SET status = 'indexed'
+                WHERE id = %s
+                """,
+                (payload.document_id,),
+            )
+
+            cur.execute(
+                """
+                UPDATE runs
+                SET status = 'succeeded',
+                    output = %s::jsonb,
+                    finished_at = now()
+                WHERE id = %s
+                """,
+                (
+                    json.dumps(
+                        {
+                            "project": project_trace_payload(),
+                            "chunks_created": len(inserted_chunks),
+                            "chunks_inserted": len(inserted_chunks),
+                            "chunks_skipped_duplicate": chunks_skipped_duplicate,
+                            "unique_chunks_seen": len(chunks),
+                            "candidate_chunks_seen": len(candidate_chunks),
+                            "ai_backend_preset": ai_backend_preset,
+                            "vector_collection": index_version["vector_collection"],
+                            "embedding_provider": embedding_client.provider,
+                            "embedding_model": embedding_client.model,
+                            "embedding_dimension": (
+                                embedding_result.dimension
+                                if embedding_result
+                                else embedding_client.dimension
+                            ),
+                            "model_call_id": str(model_call_id),
+                            "chunking": chunking_config.metadata(),
+                            "enrichers": enrichment_traces,
+                        }
+                    ),
+                    run_id,
+                ),
+            )
+
+    return RunRead(
+        id=run_id,
+        run_type="indexing",
+        status=RunStatus.succeeded,
+    )
+
+
+@router.post(
+    "/documents/{document_id}/chunking/preview",
+    response_model=ChunkingPreviewResponse,
+)
+async def preview_document_chunking(
+    document_id: UUID,
+    payload: ChunkingPreviewRequest,
+) -> ChunkingPreviewResponse:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, title, raw_text
+                FROM documents
+                WHERE id = %s
+                """,
+                (document_id,),
+            )
+            document = cur.fetchone()
+            if document is None:
+                raise ValueError(f"Document not found: {document_id}")
+
+            index_version = None
+            if payload.index_version_id is not None:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM index_versions
+                    WHERE id = %s
+                    """,
+                    (payload.index_version_id,),
+                )
+                index_version = cur.fetchone()
+                if index_version is None:
+                    raise ValueError(
+                        f"Index version not found: {payload.index_version_id}"
+                    )
+
+    chunking_config = _chunking_config_for_preview(payload, index_version)
+    chunks = chunk_text(document["raw_text"] or "", config=chunking_config)
+    return ChunkingPreviewResponse(
+        document_id=document_id,
+        title=document["title"],
+        chunking_config=chunking_config.metadata(),
+        chunks=[
+            ChunkingPreviewChunk(
+                chunk_index=chunk.chunk_index,
+                content=chunk.content,
+                content_hash=chunk.content_sha256,
+                page_start=chunk.page_start,
+                page_end=chunk.page_end,
+                section_title=chunk.metadata.get("section_title"),
+                token_count=chunk.token_count,
+                metadata=chunk.metadata,
+            )
+            for chunk in chunks
+        ],
+    )
+
+
+@router.post("/search", response_model=SearchResponse)
+async def search_documents(payload: SearchRequest) -> SearchResponse:
+    search_plan = _resolve_retrieval_plan_or_422(payload)
+    search_filters = search_plan.filters
+    registry = get_metadata_registry()
+    embedding_client = get_embedding_client()
+    reranker = (
+        get_reranker_client()
+        if search_plan.reranking_strategy is RerankingStrategy.configured_reranker
+        else None
+    )
+    ai_backend_preset = get_ai_backend_preset_name()
+    qdrant_filter = _build_qdrant_search_filter(search_filters)
+    lexical_filter_sql, lexical_filter_params = _build_metadata_filter_sql(
+        search_filters,
+        metadata_expression="metadata",
+        registry=registry,
+    )
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM index_versions
+                WHERE id = %s
+                """,
+                (payload.index_version_id,),
+            )
+            index_version = cur.fetchone()
+
+            if index_version is None:
+                raise ValueError(f"Index version not found: {payload.index_version_id}")
+
+            cur.execute(
+                """
+                INSERT INTO runs (run_type, status, index_version_id, input, output)
+                VALUES (%s, %s, %s, %s::jsonb, %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    "retrieval",
+                    "running",
+                    payload.index_version_id,
+                    json.dumps(
+                        {
+                            "project": project_trace_payload(),
+                            "query": payload.query,
+                            "top_k": search_plan.dense_top_k,
+                            "dense_top_k": search_plan.dense_top_k,
+                            "lexical_top_k": search_plan.lexical_top_k,
+                            "rerank_top_k": search_plan.rerank_top_k,
+                            "retrieval_preset": search_plan.trace_payload(),
+                            "index_version_id": str(payload.index_version_id),
+                            "ai_backend_preset": ai_backend_preset,
+                            "vector_collection": index_version["vector_collection"],
+                            "embedding_provider": embedding_client.provider,
+                            "embedding_model": embedding_client.model,
+                            "reranker_provider": reranker.provider if reranker else None,
+                            "reranker_model": reranker.model if reranker else None,
+                            "dense_weight": DENSE_WEIGHT,
+                            "lexical_weight": LEXICAL_WEIGHT,
+                            "metadata_filters": search_filters,
+                        }
+                    ),
+                    json.dumps({}),
+                ),
+            )
+            run_id = cur.fetchone()["id"]
+
+            query_embedding = await embedding_client.embed_texts([payload.query])
+            query_vector = query_embedding.vectors[0]
+
+            cur.execute(
+                """
+                INSERT INTO model_calls (
+                    run_id,
+                    call_type,
+                    provider,
+                    model,
+                    input_hash,
+                    parameters,
+                    response_metadata
+                )
+                VALUES (%s, 'embedding', %s, %s, %s, %s::jsonb, %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    run_id,
+                    embedding_client.provider,
+                    embedding_client.model,
+                    _json_trace_hash(
+                        {
+                            "query": payload.query,
+                            "index_version_id": str(payload.index_version_id),
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "dimension": query_embedding.dimension,
+                            "texts_count": 1,
+                            "index_version_id": str(payload.index_version_id),
+                            "vector_collection": index_version["vector_collection"],
+                        }
+                    ),
+                    json.dumps(
+                        _adapter_response_metadata(
+                            embedding_client,
+                            {
+                                **(query_embedding.raw or {}),
+                                "dimension": query_embedding.dimension,
+                                "vectors_count": len(query_embedding.vectors),
+                            },
+                        )
+                    ),
+                ),
+            )
+            query_embedding_model_call_id = cur.fetchone()["id"]
+
+            qdrant = get_qdrant_client()
+            dense_hits = search_chunks(
+                qdrant,
+                collection_name=index_version["vector_collection"],
+                query_vector=query_vector,
+                limit=search_plan.dense_top_k,
+                query_filter=qdrant_filter,
+            )
+
+            dense_scores_by_chunk_id = {
+                hit.payload["chunk_id"]: float(hit.score)
+                for hit in dense_hits
+                if hit.payload and "chunk_id" in hit.payload
+            }
+
+            lexical_query = _build_lexical_websearch_query(payload.query)
+            if lexical_query:
+                cur.execute(
+                    f"""
+                    WITH lexical_query AS (
+                        SELECT websearch_to_tsquery(
+                            '{LEXICAL_SEARCH_CONFIG}',
+                            %s
+                        ) AS tsq
+                    ),
+                    lexical_chunks AS (
+                        SELECT
+                            id,
+                            document_id,
+                            content,
+                            metadata,
+                            {LEXICAL_SEARCH_TEXT_SQL} AS lexical_text
+                        FROM document_chunks
+                        WHERE index_version_id = %s
+                        {lexical_filter_sql}
+                    )
+                    SELECT
+                        lexical_chunks.id,
+                        lexical_chunks.document_id,
+                        lexical_chunks.content,
+                        lexical_chunks.metadata,
+                        ts_rank_cd(
+                            to_tsvector(
+                                '{LEXICAL_SEARCH_CONFIG}',
+                                lexical_chunks.lexical_text
+                            ),
+                            lexical_query.tsq
+                        ) AS lexical_score
+                    FROM lexical_chunks
+                    CROSS JOIN lexical_query
+                    WHERE lexical_query.tsq <> ''::tsquery
+                      AND to_tsvector(
+                            '{LEXICAL_SEARCH_CONFIG}',
+                            lexical_chunks.lexical_text
+                          ) @@ lexical_query.tsq
+                    ORDER BY lexical_score DESC
+                    LIMIT %s
+                    """,
+                    (
+                        lexical_query,
+                        payload.index_version_id,
+                        *lexical_filter_params,
+                        search_plan.lexical_top_k,
+                    ),
+                )
+                lexical_hits = cur.fetchall()
+            else:
+                lexical_hits = []
+
+            candidate_ids = set(dense_scores_by_chunk_id.keys())
+            candidate_ids.update(str(row["id"]) for row in lexical_hits)
+
+            if not candidate_ids:
+                cur.execute(
+                    """
+                    UPDATE runs
+                    SET status = 'succeeded',
+                        output = %s::jsonb,
+                        finished_at = now()
+                    WHERE id = %s
+                    """,
+                    (
+                        json.dumps(
+                            {
+                                "project": project_trace_payload(),
+                                "hits": 0,
+                                "top_k": search_plan.dense_top_k,
+                                "dense_top_k": search_plan.dense_top_k,
+                                "lexical_top_k": search_plan.lexical_top_k,
+                                "rerank_top_k": search_plan.rerank_top_k,
+                                "retrieval_preset": search_plan.trace_payload(),
+                                "ai_backend_preset": ai_backend_preset,
+                                "dense_hits": len(dense_hits),
+                                "lexical_hits": len(lexical_hits),
+                                "lexical_query": lexical_query,
+                                "embedding_model_call_id": str(query_embedding_model_call_id),
+                                "vector_collection": index_version["vector_collection"],
+                                "embedding_provider": embedding_client.provider,
+                                "embedding_model": embedding_client.model,
+                                "embedding_dimension": query_embedding.dimension,
+                                "metadata_filters": search_filters,
+                            }
+                        ),
+                        run_id,
+                    ),
+                )
+                return SearchResponse(run_id=run_id, hits=[])
+
+            cur.execute(
+                """
+                SELECT id, document_id, content, metadata
+                FROM document_chunks
+                WHERE id = ANY(%s::uuid[])
+                """,
+                (list(candidate_ids),),
+            )
+            candidate_rows = cur.fetchall()
+
+            lexical_scores_by_chunk_id = {
+                str(row["id"]): float(row["lexical_score"] or 0.0)
+                for row in lexical_hits
+            }
+
+            max_dense = max(dense_scores_by_chunk_id.values() or [1.0])
+            max_lexical = max(lexical_scores_by_chunk_id.values() or [1.0])
+
+            fused = []
+            for row in candidate_rows:
+                chunk_id = str(row["id"])
+                dense_norm = dense_scores_by_chunk_id.get(chunk_id, 0.0) / max_dense
+                lexical_norm = lexical_scores_by_chunk_id.get(chunk_id, 0.0) / max_lexical
+                fused_score = (DENSE_WEIGHT * dense_norm) + (LEXICAL_WEIGHT * lexical_norm)
+                fused.append((row, fused_score, dense_norm, lexical_norm))
+
+            fused.sort(key=lambda item: item[1], reverse=True)
+            fused = fused[: search_plan.rerank_top_k]
+            initial_rank_by_chunk_id = {
+                str(row["id"]): rank
+                for rank, (row, _, _, _) in enumerate(fused, start=1)
+            }
+
+            candidates = [
+                RerankCandidate(
+                    id=str(row["id"]),
+                    text=row["content"],
+                    metadata=row["metadata"],
+                )
+                for row, _, _, _ in fused
+            ]
+            row_by_id = {str(row["id"]): row for row, _, _, _ in fused}
+
+            final_hits = []
+            rerank_model_call_id = None
+            if search_plan.reranking_strategy is RerankingStrategy.configured_reranker:
+                cur.execute(
+                    """
+                    INSERT INTO model_calls (
+                        run_id,
+                        call_type,
+                        provider,
+                        model,
+                        input_hash,
+                        parameters,
+                        response_metadata
+                    )
+                    VALUES (%s, 'reranking', %s, %s, %s, %s::jsonb, %s::jsonb)
+                    RETURNING id
+                    """,
+                    (
+                        run_id,
+                        reranker.provider,
+                        reranker.model,
+                        _json_trace_hash(
+                            {
+                                "query": payload.query,
+                                "candidate_ids": [
+                                    candidate.id for candidate in candidates
+                                ],
+                                "top_k": search_plan.rerank_top_k,
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "top_k": search_plan.rerank_top_k,
+                                "candidates_count": len(candidates),
+                            }
+                        ),
+                        json.dumps(_adapter_response_metadata(reranker)),
+                    ),
+                )
+                rerank_model_call_id = cur.fetchone()["id"]
+
+                reranked = await reranker.rerank(
+                    payload.query,
+                    candidates,
+                    top_k=search_plan.rerank_top_k,
+                )
+                for item in reranked:
+                    row = row_by_id[item.id]
+
+                    dense_norm = next(
+                        dense for candidate_row, _, dense, _ in fused
+                        if str(candidate_row["id"]) == item.id
+                    )
+                    lexical_norm = next(
+                        lexical for candidate_row, _, _, lexical in fused
+                        if str(candidate_row["id"]) == item.id
+                    )
+
+                    cur.execute(
+                        """
+                        INSERT INTO retrieval_hits (
+                            run_id,
+                            chunk_id,
+                            rank_initial,
+                            rank_final,
+                            dense_score,
+                            lexical_score,
+                            rerank_score,
+                            model_call_id
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            run_id,
+                            item.id,
+                            initial_rank_by_chunk_id.get(item.id),
+                            item.rank,
+                            dense_norm,
+                            lexical_norm,
+                            item.score,
+                            rerank_model_call_id,
+                        ),
+                    )
+
+                    final_hits.append(
+                        SearchHit(
+                            chunk_id=row["id"],
+                            document_id=row["document_id"],
+                            rank=item.rank,
+                            score=item.score,
+                            content=row["content"],
+                            metadata=row["metadata"] or {},
+                        )
+                    )
+            else:
+                for rank, (row, fused_score, dense_norm, lexical_norm) in enumerate(
+                    fused,
+                    start=1,
+                ):
+                    cur.execute(
+                        """
+                        INSERT INTO retrieval_hits (
+                            run_id,
+                            chunk_id,
+                            rank_initial,
+                            rank_final,
+                            dense_score,
+                            lexical_score,
+                            rerank_score,
+                            model_call_id
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            run_id,
+                            row["id"],
+                            rank,
+                            rank,
+                            dense_norm,
+                            lexical_norm,
+                            None,
+                            None,
+                        ),
+                    )
+
+                    final_hits.append(
+                        SearchHit(
+                            chunk_id=row["id"],
+                            document_id=row["document_id"],
+                            rank=rank,
+                            score=fused_score,
+                            content=row["content"],
+                            metadata=row["metadata"] or {},
+                        )
+                    )
+
+            cur.execute(
+                """
+                UPDATE runs
+                SET status = 'succeeded',
+                    output = %s::jsonb,
+                    finished_at = now()
+                WHERE id = %s
+                """,
+                (
+                    json.dumps(
+                        {
+                            "project": project_trace_payload(),
+                            "hits": len(final_hits),
+                            "top_k": search_plan.dense_top_k,
+                            "dense_top_k": search_plan.dense_top_k,
+                            "lexical_top_k": search_plan.lexical_top_k,
+                            "rerank_top_k": search_plan.rerank_top_k,
+                            "retrieval_preset": search_plan.trace_payload(),
+                            "ai_backend_preset": ai_backend_preset,
+                            "dense_hits": len(dense_hits),
+                            "lexical_hits": len(lexical_hits),
+                            "lexical_query": lexical_query,
+                            "candidates": len(candidates),
+                            "embedding_model_call_id": str(query_embedding_model_call_id),
+                            "rerank_model_call_id": str(rerank_model_call_id),
+                            "vector_collection": index_version["vector_collection"],
+                            "embedding_provider": embedding_client.provider,
+                            "embedding_model": embedding_client.model,
+                            "embedding_dimension": query_embedding.dimension,
+                            "reranker_provider": reranker.provider if reranker else None,
+                            "reranker_model": reranker.model if reranker else None,
+                            "dense_weight": DENSE_WEIGHT,
+                            "lexical_weight": LEXICAL_WEIGHT,
+                            "metadata_filters": search_filters,
+                        }
+                    ),
+                    run_id,
+                ),
+            )
+
+    return SearchResponse(run_id=run_id, hits=final_hits)
+
+
+@router.post("/documents/pdf", response_model=IngestionResponse)
+async def ingest_pdf(
+    file: UploadFile = File(...),
+    source_code: str = Form(...),
+    origin: str | None = Form(default=None),
+    author: str | None = Form(default=None),
+    metadata_json: str | None = Form(default=None),
+) -> IngestionResponse:
+    title = file.filename or source_code
+    normalized_source_code = source_code.strip().lower()
+    source_id = uuid4()
+    document_id = uuid4()
+    document_metadata = _normalize_ingestion_metadata_or_400(
+        metadata_json,
+        title=title,
+        source_code=normalized_source_code,
+        mime_type=file.content_type or "application/pdf",
+        filename=file.filename,
+        author=author,
+        source_id=source_id,
+        document_id=document_id,
+    )
+    content = await file.read()
+    storage_path, digest = save_uploaded_file(file.filename or "upload.pdf", content)
+    loader_result = await get_loader("pdf_pypdf_ocr_v1").load(
+        LoaderInput(
+            mime_type=file.content_type or "application/pdf",
+            filename=file.filename,
+            path=storage_path,
+            ocr_client=get_ocr_client(),
+        )
+    )
+    raw_text = loader_result.raw_text
+    document_metadata, enrichment_traces = _run_pre_chunking_enrichers(
+        document_id=document_id,
+        source_id=source_id,
+        source_code=normalized_source_code,
+        title=title,
+        raw_text=raw_text,
+        metadata=document_metadata,
+    )
+    document_metadata = _validate_document_metadata_or_400(document_metadata)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO sources (id, code, source_type, origin, author)
+                VALUES (%s, %s, 'pdf', %s, %s)
+                RETURNING id
+                """,
+                (source_id, normalized_source_code, origin, author),
+            )
+            source_id = cur.fetchone()["id"]
+
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO documents (
+                        id, source_id, title, filename, mime_type,
+                        storage_path, sha256, status, raw_text, metadata
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'parsed', %s, %s::jsonb)
+                    RETURNING id
+                    """,
+                    (
+                        document_id,
+                        source_id,
+                        title,
+                        file.filename,
+                        file.content_type or "application/pdf",
+                        storage_path,
+                        digest,
+                        raw_text,
+                        json.dumps(document_metadata),
+                    ),
+                )
+            except psycopg.errors.UniqueViolation as exc:
+                if exc.diag.constraint_name != "documents_sha256_key":
+                    raise
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "document_already_exists",
+                        "sha256": digest,
+                    },
+                ) from exc
+            document_id = cur.fetchone()["id"]
+
+            cur.execute(
+                """
+                INSERT INTO runs (run_type, status, input, output, finished_at)
+                VALUES (%s, %s, %s::jsonb, %s::jsonb, now())
+                RETURNING id
+                """,
+                (
+                    "ingestion",
+                    "succeeded",
+                    json.dumps(
+                        {
+                            "project": project_trace_payload(),
+                            "filename": file.filename,
+                            "source_code": normalized_source_code,
+                            "extraction_status": loader_result.status,
+                            "loader": loader_result.trace.metadata(),
+                            "enrichers": enrichment_traces,
+                            "metadata": document_metadata,
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "project": project_trace_payload(),
+                            "document_id": str(document_id),
+                            "enrichers": enrichment_traces,
+                            **loader_result.metadata(),
+                        }
+                    ),
+                ),
+            )
+            run_id = cur.fetchone()["id"]
+
+    return IngestionResponse(
+        run_id=run_id,
+        source_id=source_id,
+        document_id=document_id,
+        status=RunStatus.succeeded,
+    )
+
+
+@router.get("/documents/{document_id}/extraction", response_model=DocumentExtractionRead)
+async def get_document_extraction(document_id: UUID) -> DocumentExtractionRead:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    documents.id,
+                    documents.title,
+                    ingestion_run.output AS ingestion_output
+                FROM documents
+                LEFT JOIN LATERAL (
+                    SELECT output
+                    FROM runs
+                    WHERE run_type = 'ingestion'
+                      AND output->>'document_id' = documents.id::text
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                ) AS ingestion_run ON true
+                WHERE documents.id = %s
+                """,
+                (document_id,),
+            )
+            document = cur.fetchone()
+
+    if document is None:
+        raise ValueError(f"Document not found: {document_id}")
+
+    ingestion_output = document["ingestion_output"] or {}
+    extraction = ingestion_output.get("extraction") or {}
+    pages = ingestion_output.get("extracted_pages") or []
+
+    return DocumentExtractionRead(
+        document_id=document["id"],
+        title=document["title"],
+        extraction=ExtractionReportRead(**extraction),
+        pages=[ExtractedPageRead(**page) for page in pages],
+    )
+
+
+@router.post("/documents/text", response_model=IngestionResponse)
+async def ingest_text(
+    title: str = Form(...),
+    text: str = Form(...),
+    source_code: str = Form(...),
+    origin: str | None = Form(default=None),
+    author: str | None = Form(default=None),
+    metadata_json: str | None = Form(default=None),
+) -> IngestionResponse:
+    loader_result = await get_loader("plain_text_v1").load(
+        LoaderInput(mime_type="text/plain", text=text)
+    )
+    raw_text = loader_result.raw_text
+    digest = sha256_bytes(raw_text.encode("utf-8"))
+    normalized_source_code = source_code.strip().lower()
+    source_id = uuid4()
+    document_id = uuid4()
+    document_metadata = _normalize_ingestion_metadata_or_400(
+        metadata_json,
+        title=title,
+        source_code=normalized_source_code,
+        mime_type="text/plain",
+        filename=None,
+        author=author,
+        source_id=source_id,
+        document_id=document_id,
+    )
+    document_metadata, enrichment_traces = _run_pre_chunking_enrichers(
+        document_id=document_id,
+        source_id=source_id,
+        source_code=normalized_source_code,
+        title=title,
+        raw_text=raw_text,
+        metadata=document_metadata,
+    )
+    document_metadata = _validate_document_metadata_or_400(document_metadata)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO sources (id, code, source_type, origin, author)
+                VALUES (%s, %s, 'text', %s, %s)
+                RETURNING id
+                """,
+                (source_id, normalized_source_code, origin, author),
+            )
+            source_id = cur.fetchone()["id"]
+
+            cur.execute(
+                """
+                INSERT INTO documents (
+                    id, source_id, title, filename, mime_type,
+                    storage_path, sha256, status, raw_text, metadata
+                )
+                VALUES (%s, %s, %s, NULL, 'text/plain', NULL, %s, 'parsed', %s, %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    document_id,
+                    source_id,
+                    title,
+                    digest,
+                    raw_text,
+                    json.dumps(document_metadata),
+                ),
+            )
+            document_id = cur.fetchone()["id"]
+
+            cur.execute(
+                """
+                INSERT INTO runs (run_type, status, input, output, finished_at)
+                VALUES (%s, %s, %s::jsonb, %s::jsonb, now())
+                RETURNING id
+                """,
+                (
+                    "ingestion",
+                    "succeeded",
+                    json.dumps(
+                        {
+                            "project": project_trace_payload(),
+                            "title": title,
+                            "source_code": normalized_source_code,
+                            "loader": loader_result.trace.metadata(),
+                            "enrichers": enrichment_traces,
+                            "metadata": document_metadata,
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "project": project_trace_payload(),
+                            "document_id": str(document_id),
+                            "enrichers": enrichment_traces,
+                            **loader_result.metadata(),
+                        }
+                    ),
+                ),
+            )
+            run_id = cur.fetchone()["id"]
+
+    return IngestionResponse(
+        run_id=run_id,
+        source_id=source_id,
+        document_id=document_id,
+        status=RunStatus.succeeded,
+    )

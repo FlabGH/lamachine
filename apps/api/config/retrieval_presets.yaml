@@ -1,0 +1,10 @@
+presets:
+  hybrid_dense_lexical_rerank_v1:
+    name: hybrid_dense_lexical_rerank_v1
+    description: "Recherche hybride dense et lexicale avec reranking configure."
+    dense_top_k: 30
+    lexical_top_k: 30
+    rerank_top_k: 20
+    reranking_strategy: configured_reranker
+    filters: {}
+    trace_parameters: {}
