@@ -23,6 +23,7 @@
             :key="name"
             :name="name"
             :definition="definition"
+            :context="context"
             :model-value="modelValue[name]"
             @update:model-value="updateField(name, $event)"
           />
@@ -36,6 +37,7 @@
               :key="name"
               :name="name"
               :definition="definition"
+              :context="context"
               :model-value="modelValue[name]"
               @update:model-value="updateField(name, $event)"
             />
@@ -50,6 +52,7 @@
               :key="name"
               :name="name"
               :definition="definition"
+              :context="context"
               :model-value="modelValue[name]"
               @update:model-value="updateField(name, $event)"
             />
@@ -68,6 +71,7 @@
             :key="name"
             :name="name"
             :definition="definition"
+            :context="context"
             :model-value="modelValue[name]"
             @update:model-value="updateField(name, $event)"
           />
@@ -81,6 +85,7 @@
               :key="name"
               :name="name"
               :definition="definition"
+              :context="context"
               :model-value="modelValue[name]"
               @update:model-value="updateField(name, $event)"
             />
@@ -95,6 +100,7 @@
               :key="name"
               :name="name"
               :definition="definition"
+              :context="context"
               :model-value="modelValue[name]"
               @update:model-value="updateField(name, $event)"
             />
