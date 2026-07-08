@@ -537,7 +537,16 @@ def _clean_optional_text(value: str | None) -> str | None:
 
 def _resolved_index_version_payload(payload: IndexVersionCreateRequest) -> dict[str, Any]:
     try:
-        embedding_client = get_embedding_client()
+        requested_embedding_provider = _clean_optional_text(payload.embedding_provider)
+        requested_embedding_model = _clean_optional_text(payload.embedding_model)
+        requested_embedding_dimension = payload.embedding_dimension
+        embedding_client = None
+        if not (
+            requested_embedding_provider
+            and requested_embedding_model
+            and requested_embedding_dimension is not None
+        ):
+            embedding_client = get_embedding_client(provider=requested_embedding_provider)
         default_chunking = ChunkingConfig()
         chunking_strategy = (
             _clean_optional_text(payload.chunking_strategy)
@@ -565,10 +574,11 @@ def _resolved_index_version_payload(payload: IndexVersionCreateRequest) -> dict[
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     embedding_provider = (
-        _clean_optional_text(payload.embedding_provider) or embedding_client.provider
+        requested_embedding_provider
+        or embedding_client.provider
     )
-    embedding_model = _clean_optional_text(payload.embedding_model) or embedding_client.model
-    embedding_dimension = payload.embedding_dimension or embedding_client.dimension
+    embedding_model = requested_embedding_model or embedding_client.model
+    embedding_dimension = requested_embedding_dimension or embedding_client.dimension
     generated_name = _slug(
         "_".join(
             [
