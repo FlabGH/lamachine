@@ -58,6 +58,14 @@ class FakeEmbeddingClient:
         )
 
 
+def fake_embedding_client_factory(provider=None, model=None):
+    if provider is not None:
+        assert provider == FakeEmbeddingClient.provider
+    if model is not None:
+        assert model == FakeEmbeddingClient.model
+    return FakeEmbeddingClient()
+
+
 class FakeReranker:
     provider = "fake_reranker"
     model = "fake-reranker"
@@ -101,6 +109,8 @@ class FakeCursor:
         if compact_query.startswith("SELECT * FROM index_versions"):
             self._result = {
                 "id": INDEX_VERSION_ID,
+                "embedding_provider": "fake_embedding",
+                "embedding_model": "fake-embedding",
                 "embedding_dimension": 3,
                 "vector_collection": "metadata_propagation_test",
                 "chunk_size": 80,
@@ -180,7 +190,7 @@ def test_metadata_propagates_from_document_to_chunks_qdrant_and_search_hits(
     }
 
     monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection(state))
-    monkeypatch.setattr(documentary, "get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr(documentary, "get_embedding_client", fake_embedding_client_factory)
     monkeypatch.setattr(documentary, "get_reranker_client", lambda: FakeReranker())
     monkeypatch.setattr(documentary, "get_ai_backend_preset_name", lambda: "test")
     monkeypatch.setattr(documentary, "get_qdrant_client", lambda: object())
@@ -281,7 +291,7 @@ def test_indexing_traces_enabled_noop_chunk_enricher(monkeypatch):
 
     monkeypatch.setattr(documentary, "get_project_config", lambda: ProjectConfig())
     monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection(state))
-    monkeypatch.setattr(documentary, "get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr(documentary, "get_embedding_client", fake_embedding_client_factory)
     monkeypatch.setattr(documentary, "get_ai_backend_preset_name", lambda: "test")
     monkeypatch.setattr(documentary, "get_qdrant_client", lambda: object())
     monkeypatch.setattr(documentary, "ensure_collection", lambda *args, **kwargs: None)
@@ -321,7 +331,7 @@ def test_metadata_filter_restricts_dense_candidates(monkeypatch):
     }
 
     monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection(state))
-    monkeypatch.setattr(documentary, "get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr(documentary, "get_embedding_client", fake_embedding_client_factory)
     monkeypatch.setattr(documentary, "get_reranker_client", lambda: FakeReranker())
     monkeypatch.setattr(documentary, "get_ai_backend_preset_name", lambda: "test")
     monkeypatch.setattr(documentary, "get_qdrant_client", lambda: object())
@@ -396,7 +406,7 @@ def test_indexing_rejects_unknown_chunk_metadata_before_deleting_chunks(monkeypa
     )
 
     monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection(state))
-    monkeypatch.setattr(documentary, "get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr(documentary, "get_embedding_client", fake_embedding_client_factory)
     monkeypatch.setattr(documentary, "chunk_text", lambda *args, **kwargs: [invalid_chunk])
 
     with pytest.raises(MetadataValidationError, match="unknown_chunk_field"):
@@ -429,7 +439,7 @@ def test_indexing_rejects_document_chunk_propagation_conflict(monkeypatch):
     )
 
     monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection(state))
-    monkeypatch.setattr(documentary, "get_embedding_client", lambda: FakeEmbeddingClient())
+    monkeypatch.setattr(documentary, "get_embedding_client", fake_embedding_client_factory)
     monkeypatch.setattr(
         documentary,
         "chunk_text",

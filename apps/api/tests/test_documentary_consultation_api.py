@@ -556,7 +556,7 @@ def test_index_version_can_be_created_with_runtime_defaults(monkeypatch):
     monkeypatch.setattr(
         consultation,
         "get_embedding_client",
-        lambda: SimpleNamespace(
+        lambda *args, **kwargs: SimpleNamespace(
             provider="local",
             model="hash-embedding-v1",
             dimension=384,
@@ -579,13 +579,12 @@ def test_index_version_can_be_created_with_runtime_defaults(monkeypatch):
 
 def test_index_version_can_be_created_with_explicit_values(monkeypatch):
     _patch_connection(monkeypatch)
+    monkeypatch.setenv("AI_BACKEND_PRESET", "unknown-mistral-jina")
     monkeypatch.setattr(
         consultation,
         "get_embedding_client",
-        lambda: SimpleNamespace(
-            provider="local",
-            model="hash-embedding-v1",
-            dimension=384,
+        lambda *args, **kwargs: pytest.fail(
+            "explicit index version creation must not resolve runtime embedding client"
         ),
     )
 
