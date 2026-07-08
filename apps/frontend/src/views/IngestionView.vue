@@ -154,8 +154,29 @@
     </AppCard>
 
     <AppCard title="Lancer l'ingestion" subtitle="Les fichiers prets et inclus seront traites un par un.">
+      <div class="form-grid">
+        <label class="checkbox-field">
+          <input v-model="autoIndexAfterIngestion" type="checkbox" />
+          Indexer automatiquement apres ingestion
+        </label>
+        <div v-if="autoIndexAfterIngestion" class="field">
+          <label for="autoIndexVersion">Index version</label>
+          <select id="autoIndexVersion" v-model="autoIndexVersionId">
+            <option value="">Selectionner une index version</option>
+            <option v-for="index in indexVersions" :key="index.id" :value="index.id">
+              {{ index.name }} - {{ index.vector_collection }}
+            </option>
+          </select>
+          <p class="field__description">
+            Les chunks sont crees pendant l'indexation. Sans indexation, le document reste en statut ingere/parse.
+          </p>
+        </div>
+        <AppAlert v-if="indexVersionError">
+          {{ indexVersionError }}
+        </AppAlert>
+      </div>
       <div class="actions">
-        <AppButton variant="primary" :disabled="ingesting || readyFiles.length === 0" @click="runBatch">
+        <AppButton variant="primary" :disabled="ingestionDisabled" @click="runBatch">
           {{ ingesting ? "Ingestion..." : "Lancer ingestion" }}
         </AppButton>
         <span class="muted">{{ readyFiles.length }} fichier(s) pret(s)</span>
@@ -175,8 +196,9 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
+import { api } from "../api/client";
 import { fetchMetadataSchema } from "../api/catalogs";
-import { ingestPdf, ingestText } from "../api/documents";
+import { indexDocument, ingestPdf, ingestText } from "../api/documents";
 import MetadataForm from "../components/metadata/MetadataForm.vue";
 import AppAlert from "../components/ui/AppAlert.vue";
 import AppBadge from "../components/ui/AppBadge.vue";
@@ -205,6 +227,10 @@ const schema = ref({ fields: {} });
 const loadingSchema = ref(true);
 const schemaError = ref("");
 const ingesting = ref(false);
+const indexVersions = ref([]);
+const autoIndexAfterIngestion = ref(false);
+const autoIndexVersionId = ref("");
+const indexVersionError = ref("");
 const commonMetadata = ref({});
 const common = reactive({ origin: "", author: "" });
 const activeFileTab = ref("source_code");
@@ -242,6 +268,8 @@ const resultColumns = [
   { key: "status", label: "Statut" },
   { key: "document_id", label: "Document" },
   { key: "run_id", label: "Run" },
+  { key: "index_status", label: "Indexation" },
+  { key: "index_run_id", label: "Run index" },
   { key: "endpoint", label: "Endpoint" },
   { key: "message", label: "Message" },
 ];
@@ -261,14 +289,34 @@ const selectedFile = computed(() => files.value.find((file) => file.id === selec
 const readyFiles = computed(() =>
   files.value.filter((file) => file.include && effectiveStatus(file) === "ready"),
 );
+const ingestionDisabled = computed(() =>
+  ingesting.value ||
+  readyFiles.value.length === 0 ||
+  (autoIndexAfterIngestion.value && !autoIndexVersionId.value),
+);
 
 onMounted(async () => {
   try {
     schema.value = await fetchMetadataSchema();
   } catch (exc) {
-    schemaError.value = exc?.payload?.detail || exc.message || "Schema metadata indisponible.";
+    schemaError.value = exc?.payload?.detail || exc.message || "Configuration ingestion indisponible.";
   } finally {
     loadingSchema.value = false;
+  }
+
+  try {
+    const versions = await api.get("/index-versions");
+    indexVersions.value = versions.items || [];
+    autoIndexVersionId.value =
+      indexVersions.value.find((index) => index.is_active)?.id ||
+      indexVersions.value[0]?.id ||
+      "";
+    if (!autoIndexVersionId.value) {
+      indexVersionError.value = "Aucune index version disponible pour l'indexation automatique.";
+    }
+  } catch (exc) {
+    indexVersionError.value =
+      exc?.payload?.detail || exc.message || "Index versions indisponibles pour l'indexation automatique.";
   }
 });
 
@@ -418,7 +466,13 @@ function isEmpty(value) {
 }
 
 function effectiveStatus(item) {
-  if (item.status === "unsupported" || item.status === "ingested" || item.status === "ingestion_error") {
+  if (
+    item.status === "unsupported" ||
+    item.status === "ingested" ||
+    item.status === "indexed" ||
+    item.status === "ingestion_error" ||
+    item.status === "indexing_error"
+  ) {
     return item.status;
   }
   if (!item.include) return "exclu";
@@ -438,9 +492,9 @@ function effectiveMessage(item) {
 
 function statusVariant(item) {
   const status = effectiveStatus(item);
-  if (status === "ready" || status === "ingested") return "success";
+  if (status === "ready" || status === "ingested" || status === "indexed") return "success";
   if (status === "unsupported" || status === "exclu") return "warning";
-  if (status === "metadata_error" || status === "ingestion_error") return "danger";
+  if (status === "metadata_error" || status === "ingestion_error" || status === "indexing_error") return "danger";
   return "default";
 }
 
@@ -476,16 +530,39 @@ async function runBatch() {
       };
       const response = item.extension === "pdf" ? await ingestPdf(payload) : await ingestText(payload);
       item.status = "ingested";
-      item.message = "Ingere";
-      results.value.push({
+      item.message = autoIndexAfterIngestion.value
+        ? "Document ingere, indexation en cours"
+        : "Document ingere, non indexe";
+      const result = {
         id: item.id,
         name: item.name,
         endpoint: item.endpoint,
         status: response.status,
         document_id: response.document_id,
         run_id: response.run_id,
-        message: "OK",
-      });
+        index_status: autoIndexAfterIngestion.value ? "pending" : "non lancee",
+        index_run_id: "",
+        message: item.message,
+      };
+      results.value.push(result);
+      if (autoIndexAfterIngestion.value) {
+        try {
+          const indexResponse = await indexDocument({
+            document_id: response.document_id,
+            index_version_id: autoIndexVersionId.value,
+          });
+          item.status = "indexed";
+          item.message = "Document ingere et indexe";
+          result.index_status = indexResponse.status;
+          result.index_run_id = indexResponse.id;
+          result.message = item.message;
+        } catch (exc) {
+          item.status = "indexing_error";
+          item.message = `Document ingere, erreur indexation: ${JSON.stringify(exc?.payload?.detail || exc.message)}`;
+          result.index_status = "error";
+          result.message = item.message;
+        }
+      }
     } catch (exc) {
       item.status = "ingestion_error";
       item.message = JSON.stringify(exc?.payload?.detail || exc.message);
