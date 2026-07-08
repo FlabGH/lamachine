@@ -389,6 +389,53 @@ def test_metadata_filter_restricts_dense_candidates(monkeypatch):
     assert state["query_filter"].must[0].match.any == ["other_source"]
 
 
+def test_search_uses_index_version_embedding_config(monkeypatch):
+    state = {
+        "queries": [],
+        "chunk_rows": {
+            str(CHUNK_ID): {
+                "id": CHUNK_ID,
+                "document_id": DOCUMENT_ID,
+                "content": "Contenu indexe avec la version cible",
+                "metadata": DOCUMENT_METADATA,
+            }
+        },
+        "qdrant_points": [],
+    }
+    embedding_calls = []
+
+    def embedding_factory(provider=None, model=None):
+        embedding_calls.append((provider, model))
+        return fake_embedding_client_factory(provider=provider, model=model)
+
+    monkeypatch.setattr(documentary, "get_connection", lambda: FakeConnection(state))
+    monkeypatch.setattr(documentary, "get_embedding_client", embedding_factory)
+    monkeypatch.setattr(documentary, "get_reranker_client", lambda: FakeReranker())
+    monkeypatch.setattr(documentary, "get_ai_backend_preset_name", lambda: "other-runtime")
+    monkeypatch.setattr(documentary, "get_qdrant_client", lambda: object())
+    monkeypatch.setattr(
+        documentary,
+        "search_chunks",
+        lambda *args, **kwargs: [
+            SimpleNamespace(score=0.8, payload={"chunk_id": str(CHUNK_ID)})
+        ],
+    )
+
+    response = asyncio.run(
+        documentary.search_documents(
+            documentary.SearchRequest(
+                query="version cible",
+                index_version_id=INDEX_VERSION_ID,
+                top_k=5,
+                rerank_top_k=5,
+            )
+        )
+    )
+
+    assert response.hits
+    assert embedding_calls[0] == ("fake_embedding", "fake-embedding")
+
+
 def test_indexing_rejects_unknown_chunk_metadata_before_deleting_chunks(monkeypatch):
     state = {
         "queries": [],
