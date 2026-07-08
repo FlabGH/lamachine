@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from app.api import consultation
+from app.api import consultation, documentary
 from app.services.ai.clients import EmbeddingResult
 from app.services.documentary.contracts import (
     SourceSpan,
@@ -216,13 +216,24 @@ class FakePoint:
 
 def test_structured_object_search_uses_separate_object_collection(monkeypatch):
     cursor = FakeCursor(rows=[])
-    cursor._result = {"vector_collection": "chunks_v1"}
+    cursor._result = {
+        "embedding_provider": "fake",
+        "embedding_model": "fake-embedding",
+        "embedding_dimension": 2,
+        "vector_collection": "chunks_v1",
+    }
     monkeypatch.setattr(
         consultation,
         "get_connection",
         lambda: FakeConnection(cursor),
     )
-    monkeypatch.setattr(consultation, "get_embedding_client", lambda: FakeEmbeddingClient())
+    embedding_calls = []
+
+    def fake_embedding_client_factory(provider=None, model=None):
+        embedding_calls.append((provider, model))
+        return FakeEmbeddingClient()
+
+    monkeypatch.setattr(documentary, "get_embedding_client", fake_embedding_client_factory)
     monkeypatch.setattr(consultation, "get_qdrant_client", lambda: object())
 
     captured = {}
@@ -256,3 +267,4 @@ def test_structured_object_search_uses_separate_object_collection(monkeypatch):
     assert captured["collection_name"] == "chunks_v1_objects"
     assert captured["limit"] == 5
     assert captured["query_filter"].must[0].key == "object_type"
+    assert embedding_calls == [("fake", "fake-embedding")]
