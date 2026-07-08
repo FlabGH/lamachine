@@ -2,10 +2,10 @@
   <div class="field">
     <label :for="fieldId">
       {{ name }}
-      <span v-if="definition.project_input === 'required'" class="muted">(obligatoire)</span>
+      <span v-if="isRequiredInput" class="muted">(obligatoire)</span>
     </label>
-    <p v-if="definition.description" class="field__description">
-      {{ definition.description }}
+    <p v-if="description" class="field__description">
+      {{ description }}
     </p>
 
     <select
@@ -82,12 +82,23 @@ import { computed } from "vue";
 const props = defineProps({
   name: { type: String, required: true },
   definition: { type: Object, required: true },
+  context: { type: String, default: "ingestion" },
   modelValue: { type: null, default: null },
 });
 
 const emit = defineEmits(["update:modelValue"]);
 const fieldId = computed(() => `metadata-${props.name}`);
 const widget = computed(() => props.definition.presentation_widget || "");
+const isSearchContext = computed(() => props.context === "search");
+const isRequiredInput = computed(() =>
+  props.definition.project_input === "required" && !isSearchContext.value,
+);
+const description = computed(() => {
+  if (isSearchContext.value && props.name === "source_code") {
+    return "Filtre optionnel : limite la recherche à une source documentaire.";
+  }
+  return props.definition.description || "";
+});
 const isListWidget = computed(() =>
   props.definition.type === "list" &&
   ["tags", "multiselect"].includes(widget.value),
@@ -100,6 +111,7 @@ const inputType = computed(() => {
 });
 const placeholder = computed(() => {
   if (props.definition.type === "list") return "valeur1, valeur2";
+  if (isSearchContext.value) return "Filtre optionnel";
   return props.definition.project_input === "required" ? "Valeur requise" : "Optionnel";
 });
 const inputValue = computed(() => {
