@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+import psycopg
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from app.api.documentary import (
@@ -17,7 +19,7 @@ from app.api.documentary import (
 )
 from app.db import get_connection
 from app.services.ai.factory import get_embedding_client
-from app.services.documentary.chunking import list_chunking_strategies
+from app.services.documentary.chunking import ChunkingConfig, list_chunking_strategies
 from app.services.documentary.enrichers import list_enrichers
 from app.services.documentary.loaders import list_loaders
 from app.services.documentary.metadata_registry import (
@@ -190,6 +192,48 @@ class IndexVersionRead(StrictModel):
     max_chunk_size: int
     is_active: bool
     created_at: datetime | None = None
+
+
+class IndexVersionCreateRequest(StrictModel):
+    name: str | None = Field(default=None, min_length=1)
+    embedding_provider: str | None = Field(default=None, min_length=1)
+    embedding_model: str | None = Field(default=None, min_length=1)
+    embedding_dimension: int | None = Field(default=None, ge=1)
+    vector_collection: str | None = Field(default=None, min_length=1)
+    chunking_strategy: str | None = Field(default=None, min_length=1)
+    chunking_version: str | None = Field(default=None, min_length=1)
+    split_strategy: str | None = Field(default=None, min_length=1)
+    chunk_size: int | None = Field(default=None, ge=1)
+    chunk_overlap: int | None = Field(default=None, ge=0)
+    min_chunk_size: int | None = Field(default=None, ge=1)
+    max_chunk_size: int | None = Field(default=None, ge=1)
+    is_active: bool = True
+
+    @model_validator(mode="after")
+    def validate_chunking_bounds(self) -> "IndexVersionCreateRequest":
+        chunk_size = self.chunk_size
+        chunk_overlap = self.chunk_overlap
+        min_chunk_size = self.min_chunk_size
+        max_chunk_size = self.max_chunk_size
+        if (
+            chunk_size is not None
+            and chunk_overlap is not None
+            and chunk_overlap >= chunk_size
+        ):
+            raise ValueError("chunk_overlap must be lower than chunk_size")
+        if (
+            chunk_size is not None
+            and min_chunk_size is not None
+            and min_chunk_size > chunk_size
+        ):
+            raise ValueError("min_chunk_size must be lower than or equal to chunk_size")
+        if (
+            chunk_size is not None
+            and max_chunk_size is not None
+            and max_chunk_size < chunk_size
+        ):
+            raise ValueError("max_chunk_size must be greater than or equal to chunk_size")
+        return self
 
 
 class IndexVersionListResponse(PaginatedResponse):
@@ -475,6 +519,88 @@ def _without_total_count(row: dict[str, Any]) -> dict[str, Any]:
         key: value
         for key, value in row.items()
         if key != "total_count"
+    }
+
+
+def _slug(value: str, *, fallback: str) -> str:
+    slug = re.sub(r"[^a-z0-9_]+", "_", value.strip().lower())
+    slug = re.sub(r"_+", "_", slug).strip("_")
+    return slug or fallback
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _resolved_index_version_payload(payload: IndexVersionCreateRequest) -> dict[str, Any]:
+    try:
+        embedding_client = get_embedding_client()
+        default_chunking = ChunkingConfig()
+        chunking_strategy = (
+            _clean_optional_text(payload.chunking_strategy)
+            or _clean_optional_text(payload.split_strategy)
+            or default_chunking.split_strategy
+        )
+        chunking_config = ChunkingConfig(
+            chunk_size=payload.chunk_size or default_chunking.chunk_size,
+            chunk_overlap=(
+                payload.chunk_overlap
+                if payload.chunk_overlap is not None
+                else default_chunking.chunk_overlap
+            ),
+            split_strategy=_clean_optional_text(payload.split_strategy)
+            or chunking_strategy,
+            min_chunk_size=payload.min_chunk_size or default_chunking.min_chunk_size,
+            max_chunk_size=payload.max_chunk_size or default_chunking.max_chunk_size,
+            chunking_version=(
+                _clean_optional_text(payload.chunking_version)
+                or chunking_strategy
+                or default_chunking.chunking_version
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    embedding_provider = (
+        _clean_optional_text(payload.embedding_provider) or embedding_client.provider
+    )
+    embedding_model = _clean_optional_text(payload.embedding_model) or embedding_client.model
+    embedding_dimension = payload.embedding_dimension or embedding_client.dimension
+    generated_name = _slug(
+        "_".join(
+            [
+                embedding_provider,
+                embedding_model,
+                chunking_config.split_strategy,
+                str(chunking_config.chunk_size),
+                str(chunking_config.chunk_overlap),
+            ]
+        ),
+        fallback="index_version",
+    )
+    name = _clean_optional_text(payload.name) or generated_name
+    vector_collection = _clean_optional_text(payload.vector_collection) or _slug(
+        name,
+        fallback="document_chunks",
+    )
+
+    return {
+        "name": name,
+        "embedding_provider": embedding_provider,
+        "embedding_model": embedding_model,
+        "embedding_dimension": embedding_dimension,
+        "vector_collection": vector_collection,
+        "chunking_strategy": chunking_strategy,
+        "chunking_version": chunking_config.chunking_version,
+        "split_strategy": chunking_config.split_strategy,
+        "chunk_size": chunking_config.chunk_size,
+        "chunk_overlap": chunking_config.chunk_overlap,
+        "min_chunk_size": chunking_config.min_chunk_size,
+        "max_chunk_size": chunking_config.max_chunk_size,
+        "is_active": payload.is_active,
     }
 
 
@@ -764,6 +890,77 @@ def list_index_versions(
         offset=offset,
         total=_total(rows[0] if rows else None),
     )
+
+
+@router.post("/index-versions", response_model=IndexVersionRead, status_code=201)
+def create_index_version(payload: IndexVersionCreateRequest) -> IndexVersionRead:
+    values = _resolved_index_version_payload(payload)
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                if values["is_active"]:
+                    cur.execute("UPDATE index_versions SET is_active = false")
+                cur.execute(
+                    """
+                    INSERT INTO index_versions (
+                        name,
+                        embedding_provider,
+                        embedding_model,
+                        embedding_dimension,
+                        vector_collection,
+                        chunking_strategy,
+                        chunking_version,
+                        split_strategy,
+                        chunk_size,
+                        chunk_overlap,
+                        min_chunk_size,
+                        max_chunk_size,
+                        is_active
+                    )
+                    VALUES (
+                        %(name)s,
+                        %(embedding_provider)s,
+                        %(embedding_model)s,
+                        %(embedding_dimension)s,
+                        %(vector_collection)s,
+                        %(chunking_strategy)s,
+                        %(chunking_version)s,
+                        %(split_strategy)s,
+                        %(chunk_size)s,
+                        %(chunk_overlap)s,
+                        %(min_chunk_size)s,
+                        %(max_chunk_size)s,
+                        %(is_active)s
+                    )
+                    RETURNING
+                        id,
+                        name,
+                        embedding_provider,
+                        embedding_model,
+                        embedding_dimension,
+                        vector_collection,
+                        chunking_version,
+                        split_strategy,
+                        chunk_size,
+                        chunk_overlap,
+                        min_chunk_size,
+                        max_chunk_size,
+                        is_active,
+                        created_at
+                    """,
+                    values,
+                )
+                row = cur.fetchone()
+    except psycopg.errors.UniqueViolation as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "index_version_already_exists",
+                "message": "An index version with this name already exists",
+                "name": values["name"],
+            },
+        ) from exc
+    return IndexVersionRead(**row)
 
 
 @router.get("/index-versions/active", response_model=IndexVersionRead)

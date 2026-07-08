@@ -112,6 +112,25 @@ class FakeCursor:
             ]
             return
 
+        if compact_query.startswith("INSERT INTO index_versions"):
+            self._result = {
+                "id": INDEX_VERSION_ID,
+                "name": params["name"],
+                "embedding_provider": params["embedding_provider"],
+                "embedding_model": params["embedding_model"],
+                "embedding_dimension": params["embedding_dimension"],
+                "vector_collection": params["vector_collection"],
+                "chunking_version": params["chunking_version"],
+                "split_strategy": params["split_strategy"],
+                "chunk_size": params["chunk_size"],
+                "chunk_overlap": params["chunk_overlap"],
+                "min_chunk_size": params["min_chunk_size"],
+                "max_chunk_size": params["max_chunk_size"],
+                "is_active": params["is_active"],
+                "created_at": now,
+            }
+            return
+
         if "FROM index_versions" in compact_query:
             self._result = {
                 "id": INDEX_VERSION_ID,
@@ -413,6 +432,7 @@ def test_api_generic_routes_are_mounted():
     assert "/api/enrichers" in paths
     assert "/api/retrieval/presets" in paths
     assert "/api/system/summary" in paths
+    assert "/api/index-versions" in paths
     assert "/api/search" in paths
     assert "/api/documents" in paths
     assert "/api/documents/{document_id}" in paths
@@ -529,6 +549,70 @@ def test_index_versions_are_listed_with_contract(monkeypatch):
     assert response.total == 1
     assert response.items[0].id == INDEX_VERSION_ID
     assert response.items[0].vector_collection == "test_collection"
+
+
+def test_index_version_can_be_created_with_runtime_defaults(monkeypatch):
+    _patch_connection(monkeypatch)
+    monkeypatch.setattr(
+        consultation,
+        "get_embedding_client",
+        lambda: SimpleNamespace(
+            provider="local",
+            model="hash-embedding-v1",
+            dimension=384,
+        ),
+    )
+
+    response = consultation.create_index_version(
+        consultation.IndexVersionCreateRequest()
+    )
+
+    assert response.id == INDEX_VERSION_ID
+    assert response.name == "local_hash_embedding_v1_generic_window_v1_450_80"
+    assert response.embedding_provider == "local"
+    assert response.embedding_model == "hash-embedding-v1"
+    assert response.embedding_dimension == 384
+    assert response.vector_collection == response.name
+    assert response.split_strategy == "generic_window_v1"
+    assert response.is_active is True
+
+
+def test_index_version_can_be_created_with_explicit_values(monkeypatch):
+    _patch_connection(monkeypatch)
+    monkeypatch.setattr(
+        consultation,
+        "get_embedding_client",
+        lambda: SimpleNamespace(
+            provider="local",
+            model="hash-embedding-v1",
+            dimension=384,
+        ),
+    )
+
+    response = consultation.create_index_version(
+        consultation.IndexVersionCreateRequest(
+            name="mistral_index",
+            embedding_provider="mistral",
+            embedding_model="mistral-embed",
+            embedding_dimension=1024,
+            vector_collection="mistral_chunks",
+            split_strategy="generic_recursive_v1",
+            chunking_version="generic_recursive_v1",
+            chunk_size=600,
+            chunk_overlap=60,
+            min_chunk_size=100,
+            max_chunk_size=900,
+            is_active=False,
+        )
+    )
+
+    assert response.name == "mistral_index"
+    assert response.embedding_provider == "mistral"
+    assert response.embedding_dimension == 1024
+    assert response.vector_collection == "mistral_chunks"
+    assert response.split_strategy == "generic_recursive_v1"
+    assert response.chunk_size == 600
+    assert response.is_active is False
 
 
 def test_source_can_be_read_by_id_and_code(monkeypatch):
