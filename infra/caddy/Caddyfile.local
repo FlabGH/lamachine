@@ -1,0 +1,15 @@
+localhost {
+    tls internal
+
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+
+    handle /ui* {
+        reverse_proxy frontend:5173
+    }
+
+    handle {
+        redir /ui/ 302
+    }
+}

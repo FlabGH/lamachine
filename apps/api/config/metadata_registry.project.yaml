@@ -1,0 +1,12 @@
+overrides: {}
+fields: {}
+
+# Example:
+# overrides:
+#   title:
+#     description: "Project-specific user-facing label."
+#     presentation_group: description
+#     presentation_order: 10
+#     presentation_importance: primary
+#     presentation_widget: text
+#     visible_in: [ingestion, document, catalog]
