@@ -615,6 +615,60 @@ def _chunking_config_from_index_version(index_version: dict) -> ChunkingConfig:
     return ChunkingConfig.from_index_version(index_version)
 
 
+def _embedding_client_from_index_version(index_version: dict):
+    expected_provider = index_version["embedding_provider"]
+    expected_model = index_version["embedding_model"]
+    expected_dimension = int(index_version["embedding_dimension"])
+    embedding_client = get_embedding_client(
+        provider=expected_provider,
+        model=expected_model,
+    )
+    if embedding_client.provider != expected_provider:
+        raise ValueError(
+            "Embedding provider mismatch: "
+            f"index_version={expected_provider} "
+            f"client={embedding_client.provider}"
+        )
+    if embedding_client.model != expected_model:
+        raise ValueError(
+            "Embedding model mismatch: "
+            f"index_version={expected_model} "
+            f"client={embedding_client.model}"
+        )
+    if expected_dimension != embedding_client.dimension:
+        raise ValueError(
+            "Embedding dimension mismatch: "
+            f"index_version={expected_dimension} "
+            f"client={embedding_client.dimension}"
+        )
+    return embedding_client
+
+
+def _validate_embedding_result_matches_index_version(
+    *,
+    embedding_result,
+    index_version: dict,
+) -> None:
+    if embedding_result.provider != index_version["embedding_provider"]:
+        raise ValueError(
+            "Embedding result provider mismatch: "
+            f"index_version={index_version['embedding_provider']} "
+            f"result={embedding_result.provider}"
+        )
+    if embedding_result.model != index_version["embedding_model"]:
+        raise ValueError(
+            "Embedding result model mismatch: "
+            f"index_version={index_version['embedding_model']} "
+            f"result={embedding_result.model}"
+        )
+    if embedding_result.dimension != int(index_version["embedding_dimension"]):
+        raise ValueError(
+            "Embedding result dimension mismatch: "
+            f"index_version={index_version['embedding_dimension']} "
+            f"result={embedding_result.dimension}"
+        )
+
+
 def _chunking_config_for_preview(
     payload: ChunkingPreviewRequest,
     index_version: dict | None,
@@ -640,7 +694,6 @@ def _chunking_config_for_preview(
 
 
 async def index_document(payload: IndexRequest) -> RunRead:
-    embedding_client = get_embedding_client()
     ai_backend_preset = get_ai_backend_preset_name()
 
     with get_connection() as conn:
@@ -678,12 +731,7 @@ async def index_document(payload: IndexRequest) -> RunRead:
             if index_version is None:
                 raise ValueError(f"Index version not found: {payload.index_version_id}")
 
-            if index_version["embedding_dimension"] != embedding_client.dimension:
-                raise ValueError(
-                    "Embedding dimension mismatch: "
-                    f"index_version={index_version['embedding_dimension']} "
-                    f"client={embedding_client.dimension}"
-                )
+            embedding_client = _embedding_client_from_index_version(index_version)
 
             raw_text = document["raw_text"] or ""
             chunking_config = _chunking_config_from_index_version(index_version)
@@ -783,6 +831,15 @@ async def index_document(payload: IndexRequest) -> RunRead:
                             "embedding_provider": embedding_client.provider,
                             "embedding_model": embedding_client.model,
                             "embedding_dimension": embedding_client.dimension,
+                            "index_version_embedding_provider": index_version[
+                                "embedding_provider"
+                            ],
+                            "index_version_embedding_model": index_version[
+                                "embedding_model"
+                            ],
+                            "index_version_embedding_dimension": index_version[
+                                "embedding_dimension"
+                            ],
                             "chunking": chunking_config.metadata(),
                             "enrichers": enrichment_traces,
                         }
@@ -882,6 +939,10 @@ async def index_document(payload: IndexRequest) -> RunRead:
                         "index_version_id": str(payload.index_version_id),
                         "document_id": str(payload.document_id),
                     },
+                )
+                _validate_embedding_result_matches_index_version(
+                    embedding_result=embedding_result,
+                    index_version=index_version,
                 )
 
             cur.execute(
