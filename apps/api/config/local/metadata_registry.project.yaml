@@ -1,0 +1,127 @@
+overrides:
+  document_type:
+    values:
+      - article
+      - ouvrage
+      - discours
+      - tribune
+      - programme
+      - communique
+      - note
+      - rapport
+      - jeu_de_donnees
+      - autre
+      - a_verifier
+    description: "Forme du contenu : article, rapport, jeu de données, etc."
+
+fields:
+  alignement :
+    kind: project_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    project_input: optional
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values_owner: project
+    values:
+      - doctrine_reference
+      - compatible
+      - divergent
+      - opposition
+      - neutre
+      - a_verifier
+    description: "Alignement du contenu du document par rapport à la doctrine de LaMachine."
+    presentation_group: project
+    presentation_order: 40
+    presentation_importance: primary
+    presentation_widget: select
+    visible_in: [ingestion, search, document, catalog]
+  fiabilite_source :
+    kind: project_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    project_input: optional
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values_owner: project
+    values:
+      - eleve
+      - moyen
+      - faible
+      - inconnu
+      - a_verifier
+    description: "Niveau de confiance dans le contenu du document."
+    presentation_group: project
+    presentation_order: 60
+    presentation_importance: primary
+    presentation_widget: select
+    visible_in: [ingestion, search, document, catalog]
+  famille_politique :
+    kind: project_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    project_input: optional
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values_owner: project
+    values:
+      - gauche_progressiste
+      - gauche_radicale
+      - droite
+      - extreme_droite
+      - centre
+      - transpartisan
+      - sans_objet
+      - autre
+      - a_verifier
+    description: "Principale famille politique exprimée dans le document."
+    presentation_group: project
+    presentation_order: 45
+    presentation_importance: primary
+    presentation_widget: select
+    visible_in: [ingestion, search, document, catalog]
+  categorie_source:
+    kind: project_business
+    type: enum
+    scopes: [document, chunk]
+    required: false
+    project_input: optional
+    propagate_to_chunks: true
+    propagate_to_qdrant: true
+    qdrant_required: false
+    retrieval_filterable: true
+    values_owner: project
+    values:
+    - presse
+    - parti_politique
+    - organisation_civile
+    - administration
+    - institution
+    - académique
+    - collectivite
+    - entreprise
+    - syndicat
+    - organisation_internationale
+    - autre
+    - a_verifier
+    description: "Catégorie de l'auteur de la source du document : parti_politique, presse, académique, etc."
+    presentation_group: project
+    presentation_order: 50
+    presentation_importance: primary
+    presentation_widget: select
+    visible_in: [ingestion, search, document, catalog]
+
+
+# Example:
+# overrides:
+#   title:
+#     description: "Project-specific user-facing label."
