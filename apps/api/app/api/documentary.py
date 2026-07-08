@@ -1141,7 +1141,6 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
     search_plan = _resolve_retrieval_plan_or_422(payload)
     search_filters = search_plan.filters
     registry = get_metadata_registry()
-    embedding_client = get_embedding_client()
     reranker = (
         get_reranker_client()
         if search_plan.reranking_strategy is RerankingStrategy.configured_reranker
@@ -1170,6 +1169,17 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
             if index_version is None:
                 raise ValueError(f"Index version not found: {payload.index_version_id}")
 
+            try:
+                embedding_client = _embedding_client_from_index_version(index_version)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": "invalid_index_version_embedding_config",
+                        "message": str(exc),
+                    },
+                ) from exc
+
             cur.execute(
                 """
                 INSERT INTO runs (run_type, status, index_version_id, input, output)
@@ -1194,6 +1204,16 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
                             "vector_collection": index_version["vector_collection"],
                             "embedding_provider": embedding_client.provider,
                             "embedding_model": embedding_client.model,
+                            "embedding_dimension": embedding_client.dimension,
+                            "index_version_embedding_provider": index_version[
+                                "embedding_provider"
+                            ],
+                            "index_version_embedding_model": index_version[
+                                "embedding_model"
+                            ],
+                            "index_version_embedding_dimension": index_version[
+                                "embedding_dimension"
+                            ],
                             "reranker_provider": reranker.provider if reranker else None,
                             "reranker_model": reranker.model if reranker else None,
                             "dense_weight": DENSE_WEIGHT,
@@ -1207,6 +1227,19 @@ async def search_documents(payload: SearchRequest) -> SearchResponse:
             run_id = cur.fetchone()["id"]
 
             query_embedding = await embedding_client.embed_texts([payload.query])
+            try:
+                _validate_embedding_result_matches_index_version(
+                    embedding_result=query_embedding,
+                    index_version=index_version,
+                )
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": "query_embedding_mismatch",
+                        "message": str(exc),
+                    },
+                ) from exc
             query_vector = query_embedding.vectors[0]
 
             cur.execute(

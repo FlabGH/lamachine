@@ -15,6 +15,8 @@ from app.api.documentary import (
     SearchRequest as DocumentarySearchRequest,
     _default_rerank_top_k,
     _default_search_top_k,
+    _embedding_client_from_index_version,
+    _validate_embedding_result_matches_index_version,
     search_documents as documentary_search_documents,
 )
 from app.db import get_connection
@@ -1365,7 +1367,7 @@ async def search_structured_objects(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT vector_collection
+                SELECT *
                 FROM index_versions
                 WHERE id = %s
                 """,
@@ -1378,8 +1380,30 @@ async def search_structured_objects(
     vector_collection = structured_object_collection_name(
         index_version["vector_collection"]
     )
-    embedding_client = get_embedding_client()
+    try:
+        embedding_client = _embedding_client_from_index_version(index_version)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_index_version_embedding_config",
+                "message": str(exc),
+            },
+        ) from exc
     embedding = await embedding_client.embed_texts([payload.query])
+    try:
+        _validate_embedding_result_matches_index_version(
+            embedding_result=embedding,
+            index_version=index_version,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "query_embedding_mismatch",
+                "message": str(exc),
+            },
+        ) from exc
     query_filter = None
     if payload.object_type:
         query_filter = Filter(
