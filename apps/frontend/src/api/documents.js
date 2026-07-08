@@ -56,3 +56,7 @@ export async function ingestText({ file, sourceCode, metadata, origin, author, t
 export function indexDocument(payload) {
   return api.post("/index", payload);
 }
+
+export function createIndexVersion(payload) {
+  return api.post("/index-versions", payload);
+}
